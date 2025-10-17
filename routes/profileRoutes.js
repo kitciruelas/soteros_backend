@@ -209,7 +209,7 @@ router.post('/change-password', authenticateUser, async (req, res) => {
     }
 
     const user = users[0];
-    const bcrypt = require('bcrypt');
+    const bcrypt = require('bcryptjs');
 
     // Verify current password
     let isCurrentPasswordValid = false;

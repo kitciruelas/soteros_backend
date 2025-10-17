@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../config/conn');
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 const { sendStaffAccountCreationEmail } = require('../services/emailService');
 
 // GET - Get all staff members

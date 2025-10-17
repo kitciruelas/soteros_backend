@@ -1,6 +1,6 @@
 
 const pool = require('../config/conn');
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { sendPasswordResetOTP } = require('../services/emailService');
 const { generateOTP, storeOTP, verifyOTP: verifyOTPFromStore, deleteOTP } = require('../utils/otpStore');

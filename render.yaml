@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: proteq-mdrrmo-backend
+    env: node
+    buildCommand: npm install && npm ci --prefer-offline --no-audit
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+    healthCheckPath: /api/health
+    plan: free
+    region: oregon
+    branch: main
