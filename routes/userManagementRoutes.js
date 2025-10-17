@@ -3,6 +3,9 @@ const router = express.Router();
 const pool = require('../config/conn');
 const { authenticateAdmin } = require('../middleware/authMiddleware');
 
+// Protect all user management routes - admin only
+router.use(authenticateAdmin);
+
 // GET - Get all users with pagination and filtering
 router.get('/', async (req, res) => {
   try {
@@ -130,7 +133,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // PUT - Update user status
-router.put('/:id/status', authenticateAdmin, async (req, res) => {
+router.put('/:id/status', async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
@@ -209,7 +212,7 @@ router.put('/:id/status', authenticateAdmin, async (req, res) => {
 });
 
 // PUT - Update user information
-router.put('/:id', authenticateAdmin, async (req, res) => {
+router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { first_name, last_name, email, user_type } = req.body;
@@ -289,7 +292,7 @@ router.put('/:id', authenticateAdmin, async (req, res) => {
 });
 
 // DELETE - Delete user (soft delete)
-router.delete('/:id', authenticateAdmin, async (req, res) => {
+router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params;
     console.log('Deleting user:', id);
