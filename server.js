@@ -127,7 +127,11 @@ app.use('/api/system-settings', systemSettingsRoutes);
 app.use('/api/teams', teamsRoutes);
 app.use('/api/users', userManagementRoutes);
 app.use('/api/activity-logs', activityLogsRoutes);
-app.use('/api/public', publicRoutes);
+// Gate public routes behind env flag and API key protection
+if (process.env.ENABLE_PUBLIC_API === 'true') {
+    const apiKey = require('./middleware/apiKey');
+    app.use('/api/public', apiKey, publicRoutes);
+}
 app.use('/api/feedback', feedbackRoutes);
 app.use('/api/staff/dashboard', staffDashboardRoutes);
 app.use('/api/welfare', welfareRoutes);
@@ -147,27 +151,28 @@ app.get('/api/health', (req, res) => {
     });
 });
 
-// Simple test endpoint for frontend connection
-app.get('/api/test', (req, res) => {
-    res.json({
-        success: true,
-        message: 'Frontend connection test successful',
-        timestamp: new Date().toISOString(),
-        origin: req.headers.origin || 'unknown',
-        userAgent: req.headers['user-agent'] || 'unknown'
+// Diagnostic/test endpoints gated by env flag
+if (process.env.ENABLE_DIAGNOSTICS === 'true') {
+    app.get('/api/test', (req, res) => {
+        res.json({
+            success: true,
+            message: 'Frontend connection test successful',
+            timestamp: new Date().toISOString(),
+            origin: req.headers.origin || 'unknown',
+            userAgent: req.headers['user-agent'] || 'unknown'
+        });
     });
-});
 
-// CORS test endpoint
-app.get('/api/cors-test', (req, res) => {
-    res.json({
-        success: true,
-        message: 'CORS test successful',
-        timestamp: new Date().toISOString(),
-        origin: req.headers.origin || 'unknown',
-        corsEnabled: true
+    app.get('/api/cors-test', (req, res) => {
+        res.json({
+            success: true,
+            message: 'CORS test successful',
+            timestamp: new Date().toISOString(),
+            origin: req.headers.origin || 'unknown',
+            corsEnabled: true
+        });
     });
-});
+}
 
 // Root route
 app.get('/', (req, res) => {

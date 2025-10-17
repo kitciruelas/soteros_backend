@@ -62,9 +62,9 @@ const sendPasswordResetOTP = async (email, otp) => {
     console.log("Attempting to send password reset OTP to:", email)
 
     const mailOptions = {
-      from: `"${process.env.EMAIL_FROM_NAME || "ProteQ Emergency Management"}" <${process.env.EMAIL_FROM_ADDRESS || process.env.SMTP_USER}>`,
+      from: `"${process.env.EMAIL_FROM_NAME || "SoteROS Emergency Management"}" <${process.env.EMAIL_FROM_ADDRESS || process.env.SMTP_USER}>`,
       to: email,
-      subject: "Password Reset Request - ProteQ",
+      subject: "Password Reset Request - SoteROS",
       html: `
                 <!DOCTYPE html>
                 <html>
@@ -92,7 +92,7 @@ const sendPasswordResetOTP = async (email, otp) => {
                                     <tr>
                                         <td style="padding: 40px;">
                                             <p style="margin: 0 0 24px; color: #1f2937; font-size: 16px; line-height: 1.6;">Hello,</p>
-                                            <p style="margin: 0 0 32px; color: #4b5563; font-size: 15px; line-height: 1.6;">We received a request to reset your password for your ProteQ Emergency Management account. Use the verification code below to complete the process:</p>
+                                            <p style="margin: 0 0 32px; color: #4b5563; font-size: 15px; line-height: 1.6;">We received a request to reset your password for your SoteROS Emergency Management account. Use the verification code below to complete the process:</p>
                                             
                                             <!-- OTP Box -->
                                             <table role="presentation" style="width: 100%; border-collapse: collapse; margin: 0 0 32px;">
@@ -123,7 +123,7 @@ const sendPasswordResetOTP = async (email, otp) => {
                                     <tr>
                                         <td style="background-color: #f9fafb; padding: 32px 40px; border-top: 1px solid #e5e7eb;">
                                             <p style="margin: 0 0 8px; color: #6b7280; font-size: 13px; line-height: 1.5;">Best regards,</p>
-                                            <p style="margin: 0 0 20px; color: #1f2937; font-size: 14px; font-weight: 600;">ProteQ Emergency Management Team</p>
+                                            <p style="margin: 0 0 20px; color: #1f2937; font-size: 14px; font-weight: 600;">SoteROS Emergency Management Team</p>
                                             <p style="margin: 0; color: #9ca3af; font-size: 12px; line-height: 1.5;">This is an automated message, please do not reply to this email.</p>
                                         </td>
                                     </tr>
@@ -208,7 +208,7 @@ const sendIncidentAssignmentEmail = async (incidentData, teamId) => {
     for (const member of teamMembers) {
       try {
         const mailOptions = {
-          from: `"ProteQ Emergency Management" <${process.env.SMTP_USER}>`,
+          from: `"SoteROS Emergency Management" <${process.env.SMTP_USER}>`,
           to: member.email,
           subject: `🚨 Incident Assignment - ${incidentData.type}`,
           html: `
@@ -306,7 +306,7 @@ const sendIncidentAssignmentEmail = async (incidentData, teamId) => {
                                             <tr>
                                                 <td style="background-color: #f9fafb; padding: 32px 40px; border-top: 1px solid #e5e7eb;">
                                                     <p style="margin: 0 0 8px; color: #6b7280; font-size: 13px; line-height: 1.5;">Stay safe,</p>
-                                                    <p style="margin: 0 0 20px; color: #1f2937; font-size: 14px; font-weight: 600;">ProteQ Emergency Management Team</p>
+                                                    <p style="margin: 0 0 20px; color: #1f2937; font-size: 14px; font-weight: 600;">SoteROS Emergency Management Team</p>
                                                     <p style="margin: 0; color: #9ca3af; font-size: 12px; line-height: 1.5;">This is an automated incident notification. For urgent matters, contact your team coordinator directly.</p>
                                                 </td>
                                             </tr>
@@ -378,7 +378,7 @@ const sendStaffAssignmentEmail = async (incidentData, staffId) => {
     const priorityColor = priorityColors[incidentData.priorityLevel] || priorityColors["Medium"]
 
     const mailOptions = {
-      from: `"ProteQ Emergency Management" <${process.env.SMTP_USER}>`,
+      from: `"SoteROS Emergency Management" <${process.env.SMTP_USER}>`,
       to: staffMember.email,
       subject: `🚨 Personal Incident Assignment - ${incidentData.type}`,
       html: `
@@ -476,7 +476,7 @@ const sendStaffAssignmentEmail = async (incidentData, staffId) => {
                                     <tr>
                                         <td style="background-color: #f9fafb; padding: 32px 40px; border-top: 1px solid #e5e7eb;">
                                             <p style="margin: 0 0 8px; color: #6b7280; font-size: 13px; line-height: 1.5;">Stay safe,</p>
-                                            <p style="margin: 0 0 20px; color: #1f2937; font-size: 14px; font-weight: 600;">ProteQ Emergency Management Team</p>
+                                            <p style="margin: 0 0 20px; color: #1f2937; font-size: 14px; font-weight: 600;">SoteROS Emergency Management Team</p>
                                             <p style="margin: 0; color: #9ca3af; font-size: 12px; line-height: 1.5;">This is an automated incident notification. For urgent matters, contact your supervisor directly.</p>
                                         </td>
                                     </tr>
@@ -509,16 +509,16 @@ const sendStaffAccountCreationEmail = async (staffData, plainPassword) => {
     console.log("📧 Preparing to send staff account creation email to:", staffData.email)
 
     const mailOptions = {
-      from: `"${process.env.EMAIL_FROM_NAME || "ProteQ Emergency Management"}" <${process.env.EMAIL_FROM_ADDRESS || process.env.SMTP_USER}>`,
+      from: `"${process.env.EMAIL_FROM_NAME || "SoteROS Emergency Management"}" <${process.env.EMAIL_FROM_ADDRESS || process.env.SMTP_USER}>`,
       to: staffData.email,
-      subject: "Welcome to ProteQ - Your Account is Ready",
+      subject: "Welcome to SoteROS - Your Account is Ready",
       html: `
                 <!DOCTYPE html>
                 <html>
                 <head>
                     <meta charset="utf-8">
                     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                    <title>Welcome to ProteQ</title>
+                    <title>Welcome to SoteROS</title>
                 </head>
                 <body style="margin: 0; padding: 0; background-color: #f4f7fa; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
                     <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #f4f7fa;">
@@ -531,7 +531,7 @@ const sendStaffAccountCreationEmail = async (staffData, plainPassword) => {
                                             <div style="background-color: rgba(255, 255, 255, 0.2); width: 80px; height: 80px; border-radius: 50%; margin: 0 auto 20px; display: flex; align-items: center; justify-content: center;">
                                                 <span style="font-size: 40px;">👋</span>
                                             </div>
-                                            <h1 style="margin: 0 0 8px; color: #ffffff; font-size: 28px; font-weight: 700; letter-spacing: -0.5px;">Welcome to ProteQ!</h1>
+                                            <h1 style="margin: 0 0 8px; color: #ffffff; font-size: 28px; font-weight: 700; letter-spacing: -0.5px;">Welcome to SoteROS!</h1>
                                             <p style="margin: 0; color: rgba(255, 255, 255, 0.9); font-size: 14px;">Your account has been successfully created</p>
                                         </td>
                                     </tr>
@@ -540,7 +540,7 @@ const sendStaffAccountCreationEmail = async (staffData, plainPassword) => {
                                     <tr>
                                         <td style="padding: 40px;">
                                             <p style="margin: 0 0 8px; color: #1f2937; font-size: 16px; line-height: 1.6;">Hello <strong>${staffData.name}</strong>,</p>
-                                            <p style="margin: 0 0 32px; color: #4b5563; font-size: 15px; line-height: 1.6;">Welcome to the ProteQ Emergency Management System! Your staff account has been created and you're ready to get started.</p>
+                                            <p style="margin: 0 0 32px; color: #4b5563; font-size: 15px; line-height: 1.6;">Welcome to the SoteROS Emergency Management System! Your staff account has been created and you're ready to get started.</p>
                                             
                                             <!-- Credentials Card -->
                                             <table role="presentation" style="width: 100%; border-collapse: collapse; margin: 0 0 24px;">
@@ -614,7 +614,7 @@ const sendStaffAccountCreationEmail = async (staffData, plainPassword) => {
                                     <tr>
                                         <td style="background-color: #f9fafb; padding: 32px 40px; border-top: 1px solid #e5e7eb;">
                                             <p style="margin: 0 0 8px; color: #6b7280; font-size: 13px; line-height: 1.5;">Welcome aboard,</p>
-                                            <p style="margin: 0 0 20px; color: #1f2937; font-size: 14px; font-weight: 600;">ProteQ Emergency Management Team</p>
+                                            <p style="margin: 0 0 20px; color: #1f2937; font-size: 14px; font-weight: 600;">SoteROS Emergency Management Team</p>
                                             <p style="margin: 0; color: #9ca3af; font-size: 12px; line-height: 1.5;">This email contains sensitive information. Please keep it secure and delete it after changing your password.</p>
                                         </td>
                                     </tr>
