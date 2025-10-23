@@ -52,7 +52,7 @@ router.get('/', authenticateAny, async (req, res) => {
       
       if (dateFilter) {
         // General user: filter from registration date onwards
-        notificationsQuery = `SELECT n.id, n.user_id, n.type, n.title, n.message, n.is_read, n.data,
+        notificationsQuery = `SELECT n.id, n.user_id, n.type, n.title, n.message, n.severity, n.is_read, n.related_id,
          DATE_FORMAT(n.created_at, '%Y-%m-%d %H:%i:%s') as created_at,
          DATE_FORMAT(n.updated_at, '%Y-%m-%d %H:%i:%s') as updated_at
          FROM notifications n
@@ -63,7 +63,7 @@ router.get('/', authenticateAny, async (req, res) => {
         queryParams = [userId, userCreatedAt, limit, offset];
       } else {
         // Admin/Staff: show all notifications
-        notificationsQuery = `SELECT n.id, n.user_id, n.type, n.title, n.message, n.is_read, n.data,
+        notificationsQuery = `SELECT n.id, n.user_id, n.type, n.title, n.message, n.severity, n.is_read, n.related_id,
          DATE_FORMAT(n.created_at, '%Y-%m-%d %H:%i:%s') as created_at,
          DATE_FORMAT(n.updated_at, '%Y-%m-%d %H:%i:%s') as updated_at
          FROM notifications n
