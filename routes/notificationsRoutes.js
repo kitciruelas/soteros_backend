@@ -35,15 +35,10 @@ router.get('/', authenticateAny, async (req, res) => {
           
           if (generalUser.length > 0) {
             userCreatedAt = generalUser[0].created_at;
-            
-            // Determine if user is new (registered within last 7 days)
-            const daysSinceRegistration = Math.floor((Date.now() - new Date(userCreatedAt)) / (1000 * 60 * 60 * 24));
-            
-            if (daysSinceRegistration <= 7) {
-              // New user: show notifications from registration date onwards
-              dateFilter = 'AND n.created_at >= ?';
-            }
-            // Old user: no date filter, show all notifications
+            // All general users: show notifications from registration date onwards
+            // This ensures new users only see new notifications
+            // and older users see all notifications since they joined (not before)
+            dateFilter = 'AND n.created_at >= ?';
           }
         } catch (userError) {
           console.error('Error fetching user creation date:', userError);
@@ -52,12 +47,12 @@ router.get('/', authenticateAny, async (req, res) => {
       }
       // Admin and staff: no date filter, always show all notifications
       
-      // Build query based on whether user is new or old
+      // Build query based on user type
       let notificationsQuery;
       let queryParams;
       
       if (dateFilter) {
-        // New user: filter from registration date
+        // General user: filter from registration date onwards
         notificationsQuery = `SELECT n.*, n.title, n.message,
          DATE_FORMAT(n.created_at, '%Y-%m-%d %H:%i:%s') as created_at,
          DATE_FORMAT(n.updated_at, '%Y-%m-%d %H:%i:%s') as updated_at
@@ -68,7 +63,7 @@ router.get('/', authenticateAny, async (req, res) => {
          LIMIT ? OFFSET ?`;
         queryParams = [userId, userCreatedAt, limit, offset];
       } else {
-        // Old user: show all notifications
+        // Admin/Staff: show all notifications
         notificationsQuery = `SELECT n.*, n.title, n.message,
          DATE_FORMAT(n.created_at, '%Y-%m-%d %H:%i:%s') as created_at,
          DATE_FORMAT(n.updated_at, '%Y-%m-%d %H:%i:%s') as updated_at
