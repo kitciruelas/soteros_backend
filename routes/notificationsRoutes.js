@@ -52,7 +52,7 @@ router.get('/', authenticateAny, async (req, res) => {
       
       if (dateFilter) {
         // General user: filter from registration date onwards
-        notificationsQuery = `SELECT n.*, n.title, n.message,
+        notificationsQuery = `SELECT n.id, n.user_id, n.type, n.title, n.message, n.is_read, n.data,
          DATE_FORMAT(n.created_at, '%Y-%m-%d %H:%i:%s') as created_at,
          DATE_FORMAT(n.updated_at, '%Y-%m-%d %H:%i:%s') as updated_at
          FROM notifications n
@@ -63,7 +63,7 @@ router.get('/', authenticateAny, async (req, res) => {
         queryParams = [userId, userCreatedAt, limit, offset];
       } else {
         // Admin/Staff: show all notifications
-        notificationsQuery = `SELECT n.*, n.title, n.message,
+        notificationsQuery = `SELECT n.id, n.user_id, n.type, n.title, n.message, n.is_read, n.data,
          DATE_FORMAT(n.created_at, '%Y-%m-%d %H:%i:%s') as created_at,
          DATE_FORMAT(n.updated_at, '%Y-%m-%d %H:%i:%s') as updated_at
          FROM notifications n
@@ -140,6 +140,13 @@ router.get('/', authenticateAny, async (req, res) => {
 
   } catch (error) {
     console.error('Error fetching notifications:', error);
+    console.error('Error stack:', error.stack);
+    console.error('SQL Error details:', {
+      code: error.code,
+      errno: error.errno,
+      sqlMessage: error.sqlMessage,
+      sqlState: error.sqlState
+    });
     res.status(500).json({
       success: false,
       message: 'Failed to fetch notifications',
