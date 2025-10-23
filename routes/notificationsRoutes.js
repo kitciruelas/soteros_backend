@@ -11,7 +11,6 @@ router.get('/', authenticateAny, async (req, res) => {
     const limit = parseInt(req.query.limit) || 20;
     const offset = (page - 1) * limit;
     const userId = req.user.user_id || req.user.id;
-    const userRole = req.user.role;
 
     // Try to get notifications, if table doesn't exist, return empty
     try {
@@ -20,91 +19,30 @@ router.get('/', authenticateAny, async (req, res) => {
         "SELECT 1 FROM notifications LIMIT 1"
       );
       
-      // Apply date filtering only for general users (not admin or staff)
-      let userCreatedAt = null;
-      let dateFilter = '';
-      
-      // Only apply filtering for general users
-      if (!userRole || (userRole !== 'admin' && userRole !== 'staff')) {
-        try {
-          // General user - fetch registration date
-          const [generalUser] = await db.execute(
-            'SELECT created_at FROM general_users WHERE user_id = ?',
-            [userId]
-          );
-          
-          if (generalUser.length > 0) {
-            userCreatedAt = generalUser[0].created_at;
-            // ALL general users: show only notifications from registration date onwards
-            // This ensures users only see notifications created after they registered
-            dateFilter = 'AND n.created_at >= ?';
-          }
-        } catch (userError) {
-          console.error('Error fetching user creation date:', userError);
-          // If we can't determine user age, show all notifications
-        }
-      }
-      // Admin and staff: no date filter, always show all notifications
-      
-      // Build query based on user type
-      let notificationsQuery;
-      let queryParams;
-      
-      if (dateFilter) {
-        // General user: filter from registration date onwards
-        notificationsQuery = `SELECT n.id, n.user_id, n.type, n.title, n.message, n.severity, n.is_read, n.related_id,
+      // Get notifications for the user (only from today)
+      const [notifications] = await db.execute(
+        `SELECT n.*, n.title, n.message,
          DATE_FORMAT(n.created_at, '%Y-%m-%d %H:%i:%s') as created_at,
          DATE_FORMAT(n.updated_at, '%Y-%m-%d %H:%i:%s') as updated_at
          FROM notifications n
          WHERE (n.user_id = ? OR n.user_id IS NULL)
-         ${dateFilter}
+         AND DATE(n.created_at) = CURDATE()
          ORDER BY n.created_at DESC
-         LIMIT ? OFFSET ?`;
-        queryParams = [userId, userCreatedAt, limit, offset];
-      } else {
-        // Admin/Staff: show all notifications
-        notificationsQuery = `SELECT n.id, n.user_id, n.type, n.title, n.message, n.severity, n.is_read, n.related_id,
-         DATE_FORMAT(n.created_at, '%Y-%m-%d %H:%i:%s') as created_at,
-         DATE_FORMAT(n.updated_at, '%Y-%m-%d %H:%i:%s') as updated_at
-         FROM notifications n
-         WHERE (n.user_id = ? OR n.user_id IS NULL)
-         ORDER BY n.created_at DESC
-         LIMIT ? OFFSET ?`;
-        queryParams = [userId, limit, offset];
-      }
-      
-      // Get notifications for the user
-      const [notifications] = await db.execute(notificationsQuery, queryParams);
+         LIMIT ? OFFSET ?`,
+        [userId, limit, offset]
+      );
 
-      // Get total count
-      let countQuery;
-      let countParams;
-      
-      if (dateFilter) {
-        countQuery = `SELECT COUNT(*) as total FROM notifications 
-                      WHERE (user_id = ? OR user_id IS NULL) ${dateFilter}`;
-        countParams = [userId, userCreatedAt];
-      } else {
-        countQuery = 'SELECT COUNT(*) as total FROM notifications WHERE (user_id = ? OR user_id IS NULL)';
-        countParams = [userId];
-      }
-      
-      const [countResult] = await db.execute(countQuery, countParams);
+      // Get total count (only from today)
+      const [countResult] = await db.execute(
+        'SELECT COUNT(*) as total FROM notifications WHERE (user_id = ? OR user_id IS NULL) AND DATE(created_at) = CURDATE()',
+        [userId]
+      );
 
-      // Get unread count
-      let unreadQuery;
-      let unreadParams;
-      
-      if (dateFilter) {
-        unreadQuery = `SELECT COUNT(*) as unread FROM notifications 
-                       WHERE (user_id = ? OR user_id IS NULL) AND is_read = 0 ${dateFilter}`;
-        unreadParams = [userId, userCreatedAt];
-      } else {
-        unreadQuery = 'SELECT COUNT(*) as unread FROM notifications WHERE (user_id = ? OR user_id IS NULL) AND is_read = 0';
-        unreadParams = [userId];
-      }
-      
-      const [unreadResult] = await db.execute(unreadQuery, unreadParams);
+      // Get unread count (only from today)
+      const [unreadResult] = await db.execute(
+        'SELECT COUNT(*) as unread FROM notifications WHERE (user_id = ? OR user_id IS NULL) AND is_read = 0 AND DATE(created_at) = CURDATE()',
+        [userId]
+      );
 
       res.json({
         success: true,
@@ -140,13 +78,6 @@ router.get('/', authenticateAny, async (req, res) => {
 
   } catch (error) {
     console.error('Error fetching notifications:', error);
-    console.error('Error stack:', error.stack);
-    console.error('SQL Error details:', {
-      code: error.code,
-      errno: error.errno,
-      sqlMessage: error.sqlMessage,
-      sqlState: error.sqlState
-    });
     res.status(500).json({
       success: false,
       message: 'Failed to fetch notifications',
