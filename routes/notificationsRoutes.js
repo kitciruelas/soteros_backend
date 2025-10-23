@@ -35,10 +35,17 @@ router.get('/', authenticateAny, async (req, res) => {
           
           if (generalUser.length > 0) {
             userCreatedAt = generalUser[0].created_at;
-            // All general users: show notifications from registration date onwards
-            // This ensures new users only see new notifications
-            // and older users see all notifications since they joined (not before)
-            dateFilter = 'AND n.created_at >= ?';
+            
+            // Check if user is "new" (registered within the last 7 days)
+            const daysSinceRegistration = Math.floor(
+              (Date.now() - new Date(userCreatedAt).getTime()) / (1000 * 60 * 60 * 24)
+            );
+            
+            if (daysSinceRegistration <= 7) {
+              // New user: show only notifications from registration date onwards
+              dateFilter = 'AND n.created_at >= ?';
+            }
+            // Older users (> 7 days): no date filter, show all notifications
           }
         } catch (userError) {
           console.error('Error fetching user creation date:', userError);
