@@ -1,42 +1,22 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../config/conn');
-const path = require('path');
-const fs = require('fs');
-const multer = require('multer');
 const { authenticateAdmin } = require('../middleware/authMiddleware');
 const NotificationService = require('../services/notificationService');
-
-// Configure multer storage for safety protocol attachments
-const uploadsDir = path.join(__dirname, '..', 'uploads');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
-
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, uploadsDir);
-  },
-  filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    const safeOriginal = (file.originalname || 'file').replace(/[^a-zA-Z0-9_.-]/g, '_');
-    cb(null, uniqueSuffix + '-' + safeOriginal);
-  }
-});
-
-const upload = multer({ storage });
+const { uploadSafetyProtocol } = require('../config/cloudinary');
 
 // Upload an attachment for safety protocols
-router.post('/upload', upload.single('attachment'), async (req, res) => {
+router.post('/upload', uploadSafetyProtocol.single('attachment'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ success: false, message: 'No file uploaded' });
     }
-    // Return filename to be stored in DB and public path for convenience
+    // Cloudinary returns the full URL - store this in DB
     return res.json({
       success: true,
-      filename: req.file.filename,
-      path: `/uploads/${req.file.filename}`
+      filename: req.file.filename, // Cloudinary filename
+      path: req.file.path, // Full Cloudinary URL
+      url: req.file.path // Cloudinary URL for direct access
     });
   } catch (error) {
     console.error('Error uploading attachment:', error);
