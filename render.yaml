@@ -9,6 +9,12 @@ services:
         value: production
       - key: PORT
         value: 10000
+      - key: CLOUDINARY_CLOUD_NAME
+        value: dko23mxez
+      - key: CLOUDINARY_API_KEY
+        value: 946358431491153
+      - key: CLOUDINARY_API_SECRET
+        value: SKXhRRMSIQ1P3RK1dRBt4BGZcHk
     healthCheckPath: /api/health
     plan: free
     region: oregon

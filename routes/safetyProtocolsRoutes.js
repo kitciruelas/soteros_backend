@@ -11,12 +11,20 @@ router.post('/upload', uploadSafetyProtocol.single('attachment'), async (req, re
     if (!req.file) {
       return res.status(400).json({ success: false, message: 'No file uploaded' });
     }
-    // Cloudinary returns the full URL - store this in DB
+    
+    // Log what Cloudinary returns for debugging
+    console.log('Cloudinary upload response:', {
+      filename: req.file.filename,
+      path: req.file.path,
+      mimetype: req.file.mimetype
+    });
+    
+    // Return the full Cloudinary URL - this is what should be stored in the database
     return res.json({
       success: true,
-      filename: req.file.filename, // Cloudinary filename
-      path: req.file.path, // Full Cloudinary URL
-      url: req.file.path // Cloudinary URL for direct access
+      filename: req.file.filename, // Just the public ID (for reference)
+      path: req.file.path, // Full Cloudinary URL (THIS is what should be stored!)
+      url: req.file.path // Full Cloudinary URL for direct access
     });
   } catch (error) {
     console.error('Error uploading attachment:', error);
