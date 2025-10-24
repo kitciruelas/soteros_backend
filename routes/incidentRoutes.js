@@ -7,43 +7,10 @@ const NotificationService = require('../services/notificationService');
 const AdminNotificationService = require('../services/adminNotificationService');
 const path = require('path');
 const fs = require('fs');
-const multer = require('multer');
+const { uploadIncident } = require('../config/cloudinary');
 
-// Configure multer storage for incident attachments
-const uploadsDir = path.join(__dirname, '..', 'uploads', 'incidents');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
-
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, uploadsDir);
-  },
-  filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    const safeOriginal = (file.originalname || 'file').replace(/[^a-zA-Z0-9_.-]/g, '_');
-    cb(null, uniqueSuffix + '-' + safeOriginal);
-  }
-});
-
-const upload = multer({
-  storage,
-  limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB per file
-    files: 5 // max 5 files
-  },
-  fileFilter: (req, file, cb) => {
-    const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-    if (allowedTypes.includes(file.mimetype)) {
-      cb(null, true);
-    } else {
-      cb(new Error('Invalid file type. Only images are allowed.'), false);
-    }
-  }
-});
-
-// Submit incident report (authenticated users)
-router.post('/report', authenticateUser, upload.array('attachments', 5), async (req, res) => {
+// Submit incident report (authenticated users) - Using Cloudinary
+router.post('/report', authenticateUser, uploadIncident.array('attachments', 5), async (req, res) => {
   try {
     const {
       incidentType,
@@ -55,9 +22,12 @@ router.post('/report', authenticateUser, upload.array('attachments', 5), async (
       safetyStatus
     } = req.body;
 
-    // Get uploaded files
+    // Get uploaded files (now from Cloudinary)
     const attachments = req.files || [];
-    console.log('Uploaded attachments:', attachments.length);
+    console.log('📤 Uploaded attachments to Cloudinary:', attachments.length);
+    if (attachments.length > 0) {
+      console.log('✅ Cloudinary URLs:', attachments.map(f => f.path));
+    }
 
     // Validate required fields with better checking
     const missingFields = [];
@@ -144,13 +114,16 @@ router.post('/report', authenticateUser, upload.array('attachments', 5), async (
 
     // Prepare description
     let fullDescription = description;
-    let attachmentFilenames = null;
+    let attachmentUrls = null;
     if (attachments.length > 0) {
-      attachmentFilenames = attachments.map(file => file.filename).join(',');
+      // Store Cloudinary URLs as JSON array for multiple files
+      const urls = attachments.map(file => file.path); // file.path contains full Cloudinary URL
+      attachmentUrls = JSON.stringify(urls);
+      console.log('📎 Storing attachment URLs:', attachmentUrls);
     }
     fullDescription += `\n\nLocation: ${location}${latitude && longitude ? `\nGPS Coordinates: ${latitude}, ${longitude}` : ''}`;
 
-    // Insert incident report into database with attachment field
+    // Insert incident report into database with Cloudinary URLs
     const [result] = await pool.execute(
       `INSERT INTO incident_reports
        (incident_type, description, longitude, latitude, date_reported, status, reported_by, priority_level, reporter_safe_status, validation_status, attachment)
@@ -163,7 +136,7 @@ router.post('/report', authenticateUser, upload.array('attachments', 5), async (
         reportedBy,
         mappedPriority,
         mappedSafety,
-        attachmentFilenames
+        attachmentUrls // Now stores JSON array of Cloudinary URLs
       ]
     );
 
@@ -198,7 +171,7 @@ router.post('/report', authenticateUser, upload.array('attachments', 5), async (
           reported_by: reportedBy,
           reporter_safe_status: mappedSafety,
           validation_status: 'unvalidated',
-          attachment: attachmentFilenames,
+          attachment: attachmentUrls,
           user_name: req.user?.name || req.user?.first_name || 'Registered User'
         };
         
@@ -249,8 +222,8 @@ router.post('/report', authenticateUser, upload.array('attachments', 5), async (
   }
 });
 
-// Submit incident report (guest users)
-router.post('/report-guest', upload.array('attachments', 5), async (req, res) => {
+// Submit incident report (guest users) - Using Cloudinary
+router.post('/report-guest', uploadIncident.array('attachments', 5), async (req, res) => {
   try {
     const {
       incidentType,
@@ -264,9 +237,12 @@ router.post('/report-guest', upload.array('attachments', 5), async (req, res) =>
       guestContact
     } = req.body;
 
-    // Get uploaded files
+    // Get uploaded files (now from Cloudinary)
     const attachments = req.files || [];
-    console.log('Uploaded attachments (guest):', attachments.length);
+    console.log('📤 Uploaded attachments to Cloudinary (guest):', attachments.length);
+    if (attachments.length > 0) {
+      console.log('✅ Cloudinary URLs:', attachments.map(f => f.path));
+    }
 
     // Validate required fields with better checking
     const missingFields = [];
@@ -375,9 +351,12 @@ router.post('/report-guest', upload.array('attachments', 5), async (req, res) =>
 
       // Prepare description
       let fullDescription = description;
-      let attachmentFilenames = null;
+      let attachmentUrls = null;
       if (attachments.length > 0) {
-        attachmentFilenames = attachments.map(file => file.filename).join(',');
+        // Store Cloudinary URLs as JSON array for multiple files
+        const urls = attachments.map(file => file.path); // file.path contains full Cloudinary URL
+        attachmentUrls = JSON.stringify(urls);
+        console.log('📎 Storing attachment URLs (guest):', attachmentUrls);
       }
       fullDescription += `\n\nLocation: ${location}${latitude && longitude ? `\nGPS Coordinates: ${latitude}, ${longitude}` : ''}`;
 
@@ -393,7 +372,7 @@ router.post('/report-guest', upload.array('attachments', 5), async (req, res) =>
           finalLat,
           mappedPriority,
           mappedSafety,
-          attachmentFilenames
+          attachmentUrls // Now stores JSON array of Cloudinary URLs
         ]
       );
 
@@ -435,7 +414,7 @@ router.post('/report-guest', upload.array('attachments', 5), async (req, res) =>
             reported_by: null, // Guest user
             reporter_safe_status: mappedSafety,
             validation_status: 'unvalidated',
-            attachment: attachmentFilenames,
+            attachment: attachmentUrls,
             user_name: guestName.trim(),
             guest_contact: guestContact.trim()
           };
