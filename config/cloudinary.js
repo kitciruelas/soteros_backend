@@ -17,6 +17,8 @@ const safetyProtocolsStorage = new CloudinaryStorage({
     resource_type: 'auto', // Supports images, PDFs, videos, etc.
     allowed_formats: ['jpg', 'jpeg', 'png', 'pdf', 'doc', 'docx', 'gif', 'webp'],
     transformation: [{ quality: 'auto' }],
+    access_mode: 'public', // Make files publicly accessible
+    type: 'upload', // Upload type (not authenticated)
   },
 });
 
