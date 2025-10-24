@@ -119,14 +119,19 @@ router.post('/', authenticateAdmin, async (req, res) => {
   try {
     const { title, description, type, file_attachment = null, created_by = null } = req.body || {};
     
-    console.log('Creating safety protocol - received data:', {
+    console.log('📝 Creating safety protocol - received data:', {
       title,
       type,
+      file_attachment_type: typeof file_attachment,
+      file_attachment_length: file_attachment ? file_attachment.length : 0,
+      file_attachment_preview: file_attachment ? file_attachment.substring(0, 100) + '...' : null,
       created_by_from_body: created_by,
-      admin_id_from_request: req.admin?.admin_id
+      admin_id_from_request: req.admin?.admin_id,
+      body_size: JSON.stringify(req.body).length
     });
 
     if (!title || !description || !type) {
+      console.error('❌ Missing required fields:', { title: !!title, description: !!description, type: !!type });
       return res.status(400).json({ success: false, message: 'title, description and type are required' });
     }
 
@@ -185,9 +190,15 @@ router.post('/', authenticateAdmin, async (req, res) => {
     }
 
     const [rows] = await pool.execute('SELECT * FROM safety_protocols WHERE protocol_id = ?', [result.insertId]);
+    console.log('✅ Safety protocol created successfully:', {
+      protocol_id: rows[0].protocol_id,
+      title: rows[0].title,
+      has_attachments: !!rows[0].file_attachment
+    });
     return res.status(201).json({ success: true, data: rows[0] });
   } catch (error) {
-    console.error('Error creating safety protocol:', error);
+    console.error('❌ Error creating safety protocol:', error);
+    console.error('Error stack:', error.stack);
     res.status(500).json({ success: false, message: 'Internal server error', error: error.message });
   }
 });
@@ -197,6 +208,16 @@ router.put('/:id', authenticateAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const { title, description, type, file_attachment, created_by } = req.body || {};
+
+    console.log('✏️ Updating safety protocol:', {
+      protocol_id: id,
+      title,
+      type,
+      file_attachment_type: typeof file_attachment,
+      file_attachment_length: file_attachment ? file_attachment.length : 0,
+      file_attachment_preview: file_attachment ? file_attachment.substring(0, 100) + '...' : null,
+      body_size: JSON.stringify(req.body).length
+    });
 
     // Build dynamic update
     const fields = [];
@@ -236,10 +257,19 @@ router.put('/:id', authenticateAdmin, async (req, res) => {
     }
 
     const [rows] = await pool.execute('SELECT * FROM safety_protocols WHERE protocol_id = ?', [id]);
-    if (!rows[0]) return res.status(404).json({ success: false, message: 'Not found' });
+    if (!rows[0]) {
+      console.warn('⚠️ Protocol not found:', id);
+      return res.status(404).json({ success: false, message: 'Not found' });
+    }
+    console.log('✅ Safety protocol updated successfully:', {
+      protocol_id: rows[0].protocol_id,
+      title: rows[0].title,
+      has_attachments: !!rows[0].file_attachment
+    });
     return res.json({ success: true, data: rows[0] });
   } catch (error) {
-    console.error('Error updating safety protocol:', error);
+    console.error('❌ Error updating safety protocol:', error);
+    console.error('Error stack:', error.stack);
     res.status(500).json({ success: false, message: 'Internal server error', error: error.message });
   }
 });

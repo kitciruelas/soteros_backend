@@ -75,8 +75,10 @@ app.options('*', (req, res) => {
   res.header('Access-Control-Max-Age', '86400'); // 24 hours
   res.sendStatus(200);
 });
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
+
+// Increase payload size limit for multiple file attachments (Cloudinary URLs can be long)
+app.use(bodyParser.json({ limit: '10mb' }));
+app.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
 
 // Serve static files from uploads directory
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
