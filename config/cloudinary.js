@@ -18,9 +18,19 @@ const safetyProtocolsStorage = new CloudinaryStorage({
     const isDoc = file.mimetype === 'application/msword' || 
                   file.mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
     
+    const resourceType = (isPdf || isDoc) ? 'raw' : 'image';
+    
+    console.log('📋 Cloudinary upload config:', {
+      filename: file.originalname,
+      mimetype: file.mimetype,
+      size: file.size,
+      resourceType: resourceType,
+      folder: 'mdrrmo/safety-protocols'
+    });
+    
     return {
       folder: 'mdrrmo/safety-protocols',
-      resource_type: (isPdf || isDoc) ? 'raw' : 'image', // Use 'raw' for PDFs/docs
+      resource_type: resourceType, // Use 'raw' for PDFs/docs, 'image' for images
       allowed_formats: ['jpg', 'jpeg', 'png', 'pdf', 'doc', 'docx', 'gif', 'webp'],
       access_mode: 'public', // Make files publicly accessible
       type: 'upload', // Upload type (not authenticated)

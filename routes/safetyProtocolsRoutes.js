@@ -13,21 +13,40 @@ router.post('/upload', uploadSafetyProtocol.single('attachment'), async (req, re
     }
     
     // Log what Cloudinary returns for debugging
-    console.log('Cloudinary upload response:', {
+    console.log('📤 Cloudinary upload SUCCESS:', {
       filename: req.file.filename,
       path: req.file.path,
-      mimetype: req.file.mimetype
+      mimetype: req.file.mimetype,
+      size: req.file.size
     });
+    
+    // Validate that we got a proper Cloudinary URL
+    if (!req.file.path || !req.file.path.startsWith('https://res.cloudinary.com/')) {
+      console.error('❌ Invalid Cloudinary URL received:', req.file.path);
+      return res.status(500).json({ 
+        success: false, 
+        message: 'File uploaded but invalid URL received from Cloudinary'
+      });
+    }
+    
+    // For PDFs, ensure the URL uses /raw/upload/ not /image/upload/
+    let finalUrl = req.file.path;
+    if (req.file.mimetype === 'application/pdf' && finalUrl.includes('/image/upload/')) {
+      finalUrl = finalUrl.replace('/image/upload/', '/raw/upload/');
+      console.log('✅ Corrected PDF URL from /image/upload/ to /raw/upload/');
+    }
+    
+    console.log('✅ Final URL to store:', finalUrl);
     
     // Return the full Cloudinary URL - this is what should be stored in the database
     return res.json({
       success: true,
       filename: req.file.filename, // Just the public ID (for reference)
-      path: req.file.path, // Full Cloudinary URL (THIS is what should be stored!)
-      url: req.file.path // Full Cloudinary URL for direct access
+      path: finalUrl, // Full Cloudinary URL (THIS is what should be stored!)
+      url: finalUrl // Full Cloudinary URL for direct access
     });
   } catch (error) {
-    console.error('Error uploading attachment:', error);
+    console.error('❌ Error uploading attachment:', error);
     res.status(500).json({ success: false, message: 'Internal server error', error: error.message });
   }
 });
@@ -257,6 +276,77 @@ router.delete('/:id', authenticateAdmin, async (req, res) => {
     return res.json({ success: true });
   } catch (error) {
     console.error('Error deleting safety protocol:', error);
+    res.status(500).json({ success: false, message: 'Internal server error', error: error.message });
+  }
+});
+
+// Utility endpoint to check and fix Cloudinary URLs (admin only)
+router.post('/fix-urls', authenticateAdmin, async (req, res) => {
+  try {
+    const [protocols] = await pool.execute('SELECT protocol_id, title, file_attachment FROM safety_protocols WHERE file_attachment IS NOT NULL');
+    
+    const fixes = [];
+    const errors = [];
+    
+    for (const protocol of protocols) {
+      const original = protocol.file_attachment;
+      let fixed = original;
+      let needsUpdate = false;
+      
+      // Check if it's already a valid Cloudinary URL
+      if (original.startsWith('https://res.cloudinary.com/')) {
+        // Check if PDF URL is using wrong resource type
+        if (original.toLowerCase().endsWith('.pdf') && original.includes('/image/upload/')) {
+          fixed = original.replace('/image/upload/', '/raw/upload/');
+          needsUpdate = true;
+        }
+      } else if (original.startsWith('http://') || original.startsWith('https://')) {
+        // It's a URL but not Cloudinary - might be old local URL
+        errors.push({
+          protocol_id: protocol.protocol_id,
+          title: protocol.title,
+          url: original,
+          issue: 'Not a Cloudinary URL - may need re-upload'
+        });
+      } else {
+        // It's just a filename or partial path - needs manual fixing
+        errors.push({
+          protocol_id: protocol.protocol_id,
+          title: protocol.title,
+          url: original,
+          issue: 'Incomplete URL - needs re-upload'
+        });
+      }
+      
+      if (needsUpdate) {
+        await pool.execute('UPDATE safety_protocols SET file_attachment = ? WHERE protocol_id = ?', [fixed, protocol.protocol_id]);
+        fixes.push({
+          protocol_id: protocol.protocol_id,
+          title: protocol.title,
+          original: original,
+          fixed: fixed
+        });
+      }
+    }
+    
+    console.log('✅ URL Fix Results:', {
+      total: protocols.length,
+      fixed: fixes.length,
+      errors: errors.length
+    });
+    
+    res.json({
+      success: true,
+      summary: {
+        total: protocols.length,
+        fixed: fixes.length,
+        errors: errors.length
+      },
+      fixes: fixes,
+      errors: errors
+    });
+  } catch (error) {
+    console.error('❌ Error fixing URLs:', error);
     res.status(500).json({ success: false, message: 'Internal server error', error: error.message });
   }
 });
