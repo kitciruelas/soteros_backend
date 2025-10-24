@@ -4,39 +4,7 @@ const pool = require('../config/conn');
 const { authenticateUser } = require('../middleware/authMiddleware');
 const path = require('path');
 const fs = require('fs');
-const multer = require('multer');
-
-// Configure multer storage for profile pictures
-const uploadsDir = path.join(__dirname, '..', 'uploads', 'profiles');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
-
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, uploadsDir);
-  },
-  filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    const safeOriginal = (file.originalname || 'profile').replace(/[^a-zA-Z0-9_.-]/g, '_');
-    cb(null, `profile-${uniqueSuffix}-${safeOriginal}`);
-  }
-});
-
-const upload = multer({
-  storage,
-  limits: {
-    fileSize: 5 * 1024 * 1024, // 5MB per file
-  },
-  fileFilter: (req, file, cb) => {
-    const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-    if (allowedTypes.includes(file.mimetype)) {
-      cb(null, true);
-    } else {
-      cb(new Error('Invalid file type. Only images (JPEG, PNG, GIF, WebP) are allowed.'), false);
-    }
-  }
-});
+const { uploadProfile } = require('../config/cloudinary');
 
 // Get current user profile (authenticated user)
 router.get('/me', authenticateUser, async (req, res) => {
@@ -302,14 +270,13 @@ router.get('/:email', async (req, res) => {
   }
 });
 
-// Upload profile picture (authenticated user)
-router.post('/upload-picture', authenticateUser, upload.single('profilePicture'), async (req, res) => {
+// Upload profile picture (authenticated user) - Using Cloudinary
+router.post('/upload-picture', authenticateUser, uploadProfile.single('profilePicture'), async (req, res) => {
   try {
     const userId = req.user.user_id;
 
-    console.log('Profile picture upload request received');
+    console.log('📤 Profile picture upload request received');
     console.log('User ID from token:', userId);
-    console.log('Request headers:', req.headers);
     console.log('File received:', req.file ? 'Yes' : 'No');
 
     if (!req.file) {
@@ -319,9 +286,12 @@ router.post('/upload-picture', authenticateUser, upload.single('profilePicture')
       });
     }
 
-    console.log('Profile picture upload request from user ID:', userId);
+    console.log('✅ Cloudinary upload successful:', {
+      url: req.file.path,
+      filename: req.file.filename
+    });
 
-    // Get current profile picture to delete old one
+    // Get current profile picture
     const [currentUsers] = await pool.execute(
       'SELECT profile_picture FROM general_users WHERE user_id = ?',
       [userId]
@@ -336,29 +306,22 @@ router.post('/upload-picture', authenticateUser, upload.single('profilePicture')
 
     const currentUser = currentUsers[0];
 
-    // Delete old profile picture if it exists
+    // Note: Old Cloudinary images can be cleaned up via Cloudinary dashboard or API
+    // For now, we just replace the URL in the database
     if (currentUser.profile_picture) {
-      const oldFilePath = path.join(__dirname, '..', 'uploads', currentUser.profile_picture);
-      if (fs.existsSync(oldFilePath)) {
-        try {
-          fs.unlinkSync(oldFilePath);
-          console.log('Old profile picture deleted:', currentUser.profile_picture);
-        } catch (deleteError) {
-          console.error('Error deleting old profile picture:', deleteError);
-        }
-      }
+      console.log('Replacing old profile picture URL:', currentUser.profile_picture);
     }
 
-    // Build public URL for the new profile picture
-    const publicPath = `/uploads/profiles/${req.file.filename}`;
+    // Store the full Cloudinary URL
+    const cloudinaryUrl = req.file.path;
 
-    // Update user profile with new picture path
+    // Update user profile with new Cloudinary URL
     await pool.execute(
       'UPDATE general_users SET profile_picture = ?, updated_at = NOW() WHERE user_id = ?',
-      [publicPath, userId]
+      [cloudinaryUrl, userId]
     );
 
-    console.log('Profile picture updated for user ID:', userId);
+    console.log('✅ Profile picture updated for user ID:', userId);
 
     // Log profile picture update
     try {
@@ -366,7 +329,7 @@ router.post('/upload-picture', authenticateUser, upload.single('profilePicture')
       await pool.execute(`
         INSERT INTO activity_logs (general_user_id, action, details, ip_address, created_at)
         VALUES (?, 'profile_picture_update', ?, ?, NOW())
-      `, [userId, 'Profile picture updated', clientIP]);
+      `, [userId, `Profile picture uploaded to Cloudinary`, clientIP]);
       console.log('✅ Activity logged: profile_picture_update');
     } catch (logError) {
       console.error('❌ Failed to log profile picture update activity:', logError.message);
@@ -386,11 +349,11 @@ router.post('/upload-picture', authenticateUser, upload.single('profilePicture')
       success: true,
       message: 'Profile picture updated successfully',
       user: updatedUsers[0],
-      profilePicture: publicPath
+      profilePicture: cloudinaryUrl
     });
 
   } catch (error) {
-    console.error('Error uploading profile picture:', error);
+    console.error('❌ Error uploading profile picture:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to upload profile picture. Please try again.'
@@ -403,7 +366,7 @@ router.delete('/delete-picture', authenticateUser, async (req, res) => {
   try {
     const userId = req.user.user_id;
 
-    console.log('Profile picture deletion request from user ID:', userId);
+    console.log('🗑️ Profile picture deletion request from user ID:', userId);
 
     // Get current profile picture
     const [currentUsers] = await pool.execute(
@@ -427,16 +390,9 @@ router.delete('/delete-picture', authenticateUser, async (req, res) => {
       });
     }
 
-    // Delete profile picture file
-    const filePath = path.join(__dirname, '..', 'uploads', currentUser.profile_picture);
-    if (fs.existsSync(filePath)) {
-      try {
-        fs.unlinkSync(filePath);
-        console.log('Profile picture file deleted:', currentUser.profile_picture);
-      } catch (deleteError) {
-        console.error('Error deleting profile picture file:', deleteError);
-      }
-    }
+    // Note: For Cloudinary images, deletion can be managed via Cloudinary dashboard
+    // We just remove the URL from the database here
+    console.log('Removing profile picture URL from database:', currentUser.profile_picture);
 
     // Update user profile to remove picture path
     await pool.execute(
@@ -444,7 +400,7 @@ router.delete('/delete-picture', authenticateUser, async (req, res) => {
       [userId]
     );
 
-    console.log('Profile picture deleted for user ID:', userId);
+    console.log('✅ Profile picture deleted for user ID:', userId);
 
     // Log profile picture deletion
     try {
@@ -475,7 +431,7 @@ router.delete('/delete-picture', authenticateUser, async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error deleting profile picture:', error);
+    console.error('❌ Error deleting profile picture:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to delete profile picture. Please try again.'
