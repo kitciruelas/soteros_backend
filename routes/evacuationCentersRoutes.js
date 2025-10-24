@@ -3,26 +3,34 @@ const router = express.Router();
 const pool = require('../config/conn');
 const path = require('path');
 const fs = require('fs');
-const multer = require('multer');
 const { authenticateAdmin } = require('../middleware/authMiddleware');
+const { uploadResource, cloudinary } = require('../config/cloudinary');
 
-// Configure multer storage
-const uploadsDir = path.join(__dirname, '..', 'uploads');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, uploadsDir);
-  },
-  filename: function (req, file, cb) {
-    const ext = path.extname(file.originalname);
-    const base = path.basename(file.originalname, ext).replace(/[^a-zA-Z0-9-_]/g, '_');
-    const name = `${base}-${Date.now()}${ext}`;
-    cb(null, name);
+// Helper function to extract public_id from Cloudinary URL
+const getCloudinaryPublicId = (url) => {
+  if (!url || !url.includes('cloudinary')) return null;
+  try {
+    // Extract public_id from URL like: https://res.cloudinary.com/.../mdrrmo/resources/filename.ext
+    const matches = url.match(/\/mdrrmo\/resources\/([^\.]+)/);
+    return matches ? `mdrrmo/resources/${matches[1]}` : null;
+  } catch (error) {
+    console.error('Error extracting public_id:', error);
+    return null;
   }
-});
-const upload = multer({ storage });
+};
+
+// Helper function to delete image from Cloudinary
+const deleteCloudinaryImage = async (url) => {
+  const publicId = getCloudinaryPublicId(url);
+  if (publicId) {
+    try {
+      await cloudinary.uploader.destroy(publicId);
+      console.log('🗑️ Deleted image from Cloudinary:', publicId);
+    } catch (error) {
+      console.error('Error deleting from Cloudinary:', error);
+    }
+  }
+};
 
 // Get all evacuation centers (public access for viewing)
 router.get('/', async (req, res) => {
@@ -260,20 +268,45 @@ router.put('/:centerId/resources/:resourceId', authenticateAdmin, async (req, re
   }
 });
 
-// Upload a resource picture (multipart/form-data)
-router.post('/:centerId/resources/:resourceId/picture', authenticateAdmin, upload.single('picture'), async (req, res) => {
+// Upload a resource picture (multipart/form-data) - Using Cloudinary
+router.post('/:centerId/resources/:resourceId/picture', authenticateAdmin, uploadResource.single('picture'), async (req, res) => {
   const { centerId, resourceId } = req.params;
   try {
     if (!req.file) {
       return res.status(400).json({ success: false, message: 'No file uploaded' });
     }
-    // Build a public URL to the uploaded file
-    const publicPath = `/uploads/${req.file.filename}`;
-    await pool.execute('UPDATE evacuation_resources SET picture = ? WHERE center_id = ? AND resource_id = ?', [publicPath, centerId, resourceId]);
+    
+    console.log('📸 Resource picture uploaded to Cloudinary:', {
+      filename: req.file.originalname,
+      path: req.file.path,
+      size: req.file.size
+    });
+    
+    // Get the current resource to check for existing picture
+    const [currentResource] = await pool.execute('SELECT picture FROM evacuation_resources WHERE center_id = ? AND resource_id = ?', [centerId, resourceId]);
+    
+    if (!currentResource[0]) {
+      return res.status(404).json({ success: false, message: 'Resource not found' });
+    }
+    
+    // Delete old image from Cloudinary if it exists
+    if (currentResource[0].picture && currentResource[0].picture.includes('cloudinary')) {
+      await deleteCloudinaryImage(currentResource[0].picture);
+    }
+    
+    // Use Cloudinary secure_url as the picture URL
+    const pictureUrl = req.file.path; // Cloudinary provides the URL in the path field
+    
+    // Update the resource with the Cloudinary URL
+    await pool.execute('UPDATE evacuation_resources SET picture = ? WHERE center_id = ? AND resource_id = ?', [pictureUrl, centerId, resourceId]);
+    
     const [rows] = await pool.execute('SELECT * FROM evacuation_resources WHERE center_id = ? AND resource_id = ?', [centerId, resourceId]);
-    res.json({ success: true, data: rows[0] });
+    
+    console.log('✅ Resource picture updated successfully:', pictureUrl);
+    
+    res.json({ success: true, data: rows[0], pictureUrl });
   } catch (error) {
-    console.error('Error uploading resource picture:', error);
+    console.error('❌ Error uploading resource picture:', error);
     res.status(500).json({ success: false, message: 'Internal server error', error: error.message });
   }
 });
@@ -283,9 +316,20 @@ router.delete('/:centerId/resources/:resourceId', authenticateAdmin, async (req,
   const { centerId, resourceId } = req.params;
   try {
     const [centerRows] = await pool.execute('SELECT name FROM evacuation_centers WHERE center_id = ?', [centerId]);
-    const [result] = await pool.execute('DELETE FROM evacuation_resources WHERE center_id = ? AND resource_id = ?', [centerId, resourceId]);
-    if (result.affectedRows === 0) {
+    
+    // Get the resource to check for picture before deletion
+    const [resourceRows] = await pool.execute('SELECT picture FROM evacuation_resources WHERE center_id = ? AND resource_id = ?', [centerId, resourceId]);
+    
+    if (resourceRows.length === 0) {
       return res.status(404).json({ success: false, message: 'Resource not found' });
+    }
+    
+    // Delete the resource from database
+    const [result] = await pool.execute('DELETE FROM evacuation_resources WHERE center_id = ? AND resource_id = ?', [centerId, resourceId]);
+    
+    // Delete image from Cloudinary if it exists
+    if (resourceRows[0].picture && resourceRows[0].picture.includes('cloudinary')) {
+      await deleteCloudinaryImage(resourceRows[0].picture);
     }
 
     // Log the resource deletion
