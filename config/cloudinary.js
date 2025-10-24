@@ -12,13 +12,21 @@ cloudinary.config({
 // Create Cloudinary storage for safety protocols
 const safetyProtocolsStorage = new CloudinaryStorage({
   cloudinary: cloudinary,
-  params: {
-    folder: 'mdrrmo/safety-protocols',
-    resource_type: 'auto', // Supports images, PDFs, videos, etc.
-    allowed_formats: ['jpg', 'jpeg', 'png', 'pdf', 'doc', 'docx', 'gif', 'webp'],
-    transformation: [{ quality: 'auto' }],
-    access_mode: 'public', // Make files publicly accessible
-    type: 'upload', // Upload type (not authenticated)
+  params: async (req, file) => {
+    // Determine resource type based on mimetype
+    const isPdf = file.mimetype === 'application/pdf';
+    const isDoc = file.mimetype === 'application/msword' || 
+                  file.mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    
+    return {
+      folder: 'mdrrmo/safety-protocols',
+      resource_type: (isPdf || isDoc) ? 'raw' : 'image', // Use 'raw' for PDFs/docs
+      allowed_formats: ['jpg', 'jpeg', 'png', 'pdf', 'doc', 'docx', 'gif', 'webp'],
+      access_mode: 'public', // Make files publicly accessible
+      type: 'upload', // Upload type (not authenticated)
+      // Don't use transformation for raw files (PDFs/docs)
+      ...((!isPdf && !isDoc) && { transformation: [{ quality: 'auto' }] })
+    };
   },
 });
 
