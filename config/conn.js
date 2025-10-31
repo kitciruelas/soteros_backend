@@ -8,14 +8,14 @@ const pool = mysql.createPool({
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0,
-    debug: false,  // shows query logs / false if deployment
-    trace: false   // traces connection calls / false if deployment
+    debug: true,  // shows query logs / false if deployment
+    trace: true   // traces connection calls / false if deployment
   });
   
 
 // Add connection error handling
 pool.on('error', (err) => {
-    // console.error('MySQL Pool Error:', err);
+    console.error('MySQL Pool Error:', err);
 });
 
 module.exports = pool; 
