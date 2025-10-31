@@ -15,7 +15,7 @@ const pool = mysql.createPool({
 
 // Add connection error handling
 pool.on('error', (err) => {
-    console.error('MySQL Pool Error:', err);
+    // console.error('MySQL Pool Error:', err);
 });
 
 module.exports = pool; 
