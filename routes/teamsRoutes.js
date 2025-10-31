@@ -1,9 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../config/conn');
+const { authenticateAdmin } = require('../middleware/authMiddleware');
 
 // GET - Get all teams
-router.get('/', async (req, res) => {
+router.get('/', authenticateAdmin, async (req, res) => {
   try {
     const { page = 1, limit = 50 } = req.query;
     
@@ -61,7 +62,7 @@ router.get('/', async (req, res) => {
 });
 
 // GET - Get team by ID
-router.get('/:id', async (req, res) => {
+router.get('/:id', authenticateAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     
@@ -109,7 +110,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST - Create new team
-router.post('/', async (req, res) => {
+router.post('/', authenticateAdmin, async (req, res) => {
   try {
     const { member_no, name, description } = req.body;
     
@@ -142,7 +143,7 @@ router.post('/', async (req, res) => {
 });
 
 // PUT - Update team
-router.put('/:id', async (req, res) => {
+router.put('/:id', authenticateAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const { member_no, name, description } = req.body;
@@ -183,7 +184,7 @@ router.put('/:id', async (req, res) => {
 });
 
 // PUT - Update team member count
-router.put('/:id/member-count', async (req, res) => {
+router.put('/:id/member-count', authenticateAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const { member_count } = req.body;
@@ -228,7 +229,7 @@ router.put('/:id/member-count', async (req, res) => {
 });
 
 // DELETE - Delete team
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', authenticateAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     
@@ -274,7 +275,7 @@ router.delete('/:id', async (req, res) => {
 });
 
 // GET - Get staff by team
-router.get('/:id/staff', async (req, res) => {
+router.get('/:id/staff', authenticateAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     
@@ -301,7 +302,7 @@ router.get('/:id/staff', async (req, res) => {
 });
 
 // POST - Assign staff to team
-router.post('/:id/staff/:staffId', async (req, res) => {
+router.post('/:id/staff/:staffId', authenticateAdmin, async (req, res) => {
   try {
     const { id, staffId } = req.params;
     
@@ -364,7 +365,7 @@ router.post('/:id/staff/:staffId', async (req, res) => {
 });
 
 // DELETE - Remove staff from team
-router.delete('/:id/staff/:staffId', async (req, res) => {
+router.delete('/:id/staff/:staffId', authenticateAdmin, async (req, res) => {
   try {
     const { id, staffId } = req.params;
     

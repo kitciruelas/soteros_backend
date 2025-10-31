@@ -3,9 +3,10 @@ const router = express.Router();
 const pool = require('../config/conn');
 const bcrypt = require('bcryptjs');
 const { sendStaffAccountCreationEmail } = require('../services/emailService');
+const { authenticateAdmin, authenticateStaff, authenticateAny } = require('../middleware/authMiddleware');
 
 // GET - Get all staff members
-router.get('/', async (req, res) => {
+router.get('/', authenticateAdmin, async (req, res) => {
   try {
     const { 
       page = 1, 
@@ -101,7 +102,7 @@ router.get('/', async (req, res) => {
 });
 
 // GET - Get staff member by ID
-router.get('/:id', async (req, res) => {
+router.get('/:id', authenticateAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     console.log('Fetching staff member with ID:', id);
@@ -138,7 +139,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST - Create new staff member
-router.post('/', async (req, res) => {
+router.post('/', authenticateAdmin, async (req, res) => {
   try {
     const {
       name,
@@ -228,7 +229,7 @@ router.post('/', async (req, res) => {
 });
 
 // PUT - Update staff member
-router.put('/:id', async (req, res) => {
+router.put('/:id', authenticateAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const { name, email, phone, position, department, team_id } = req.body;
@@ -324,7 +325,7 @@ router.put('/:id', async (req, res) => {
 });
 
 // PUT - Update staff status
-router.put('/:id/status', async (req, res) => {
+router.put('/:id/status', authenticateAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
@@ -382,12 +383,13 @@ router.put('/:id/status', async (req, res) => {
 });
 
 // PUT - Update staff availability
-router.put('/:id/availability', async (req, res) => {
+// Allow staff to update their own availability, or admin to update any staff
+router.put('/:id/availability', authenticateAny, async (req, res) => {
   try {
     const { id } = req.params;
     const { availability } = req.body;
     
-    console.log('Updating staff availability:', { id, availability });
+    console.log('Updating staff availability:', { id, availability, userType: req.userType, userId: req.user?.id || req.user?.admin_id || req.user?.staff_id });
     
     if (!availability || !['available', 'busy', 'off-duty'].includes(availability)) {
       return res.status(400).json({
@@ -409,6 +411,19 @@ router.put('/:id/availability', async (req, res) => {
       });
     }
     
+    // Authorization check: Staff can only update their own availability, admin can update any
+    const isAdmin = req.userType === 'admin';
+    const isStaff = req.userType === 'staff';
+    // For staff, the id field should match the staff member's id
+    const isUpdatingSelf = isStaff && parseInt(req.user.id) === parseInt(id);
+    
+    if (!isAdmin && !isUpdatingSelf) {
+      return res.status(403).json({
+        success: false,
+        message: 'You can only update your own availability'
+      });
+    }
+    
     // Update staff availability
     await pool.execute(
       'UPDATE staff SET availability = ?, updated_at = NOW() WHERE id = ?',
@@ -416,14 +431,17 @@ router.put('/:id/availability', async (req, res) => {
     );
     
     // Log the availability change with correct user type
-    const userType = req.user?.role === 'staff' ? 'staff' : 'admin';
-    const userName = req.user?.name || 'Unknown User';
-    const logUser = `${userType} ${userName}`;
-
-    await pool.execute(`
-      INSERT INTO activity_logs (staff_id, action, details, created_at)
-      VALUES (?, 'staff_availability_update', ?, NOW())
-    `, [id, `Updated staff ${existingStaff[0].name} availability to ${availability}`]);
+    if (isAdmin) {
+      await pool.execute(`
+        INSERT INTO activity_logs (admin_id, action, details, created_at)
+        VALUES (?, 'staff_availability_update', ?, NOW())
+      `, [req.user.admin_id || req.user.id, `Updated staff ${existingStaff[0].name} availability to ${availability}`]);
+    } else {
+      await pool.execute(`
+        INSERT INTO activity_logs (staff_id, action, details, created_at)
+        VALUES (?, 'staff_availability_update', ?, NOW())
+      `, [id, `Updated own availability to ${availability}`]);
+    }
     
     res.json({
       success: true,
@@ -441,7 +459,7 @@ router.put('/:id/availability', async (req, res) => {
 });
 
 // DELETE - Delete staff member (soft delete)
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', authenticateAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     console.log('Deleting staff member:', id);
@@ -489,7 +507,7 @@ router.delete('/:id', async (req, res) => {
 });
 
 // GET - Get staff statistics
-router.get('/stats/overview', async (req, res) => {
+router.get('/stats/overview', authenticateAdmin, async (req, res) => {
   try {
     console.log('Fetching staff statistics...');
     

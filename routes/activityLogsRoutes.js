@@ -1,9 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../config/conn');
+const { authenticateAdmin } = require('../middleware/authMiddleware');
 
 // GET - Get activity logs with pagination and filtering
-router.get('/', async (req, res) => {
+router.get('/', authenticateAdmin, async (req, res) => {
   try {
     const {
       page = 1,
@@ -171,7 +172,7 @@ router.get('/', async (req, res) => {
 });
 
 // GET - Get activity log statistics
-router.get('/stats', async (req, res) => {
+router.get('/stats', authenticateAdmin, async (req, res) => {
   try {
     console.log('Fetching activity log statistics...');
     
@@ -245,7 +246,7 @@ router.get('/stats', async (req, res) => {
 });
 
 // POST - Log admin activity (utility function for other routes)
-router.post('/log', async (req, res) => {
+router.post('/log', authenticateAdmin, async (req, res) => {
   try {
     const {
       user_type = 'admin',
@@ -286,7 +287,7 @@ router.post('/log', async (req, res) => {
 });
 
 // DELETE - Clear old activity logs (older than specified days)
-router.delete('/cleanup', async (req, res) => {
+router.delete('/cleanup', authenticateAdmin, async (req, res) => {
   try {
     const { days = 90 } = req.query;
     
@@ -320,7 +321,7 @@ router.delete('/cleanup', async (req, res) => {
 });
 
 // Test endpoint to check database connectivity and table status
-router.get('/test', async (req, res) => {
+router.get('/test', authenticateAdmin, async (req, res) => {
   try {
     console.log('🧪 Testing activity logs database connectivity...');
     
