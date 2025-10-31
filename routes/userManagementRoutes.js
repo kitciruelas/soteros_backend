@@ -99,119 +99,6 @@ router.get('/', async (req, res) => {
   }
 });
 
-// GET - Get user statistics (must be before /:id route)
-router.get('/stats/overview', async (req, res) => {
-  try {
-    console.log('Fetching user statistics...');
-    
-    // Get total users count
-    const [totalResult] = await pool.execute(
-      'SELECT COUNT(*) as total FROM general_users'
-    );
-    
-    // Get active users count
-    const [activeResult] = await pool.execute(
-      'SELECT COUNT(*) as active FROM general_users WHERE status = 1'
-    );
-    
-    // Get inactive users count
-    const [inactiveResult] = await pool.execute(
-      'SELECT COUNT(*) as inactive FROM general_users WHERE status = 0'
-    );
-    
-    // Get users by type
-    const [userTypeStats] = await pool.execute(`
-      SELECT user_type, COUNT(*) as count 
-      FROM general_users 
-      GROUP BY user_type 
-      ORDER BY count DESC
-    `);
-    
-    // Get recent registrations (last 30 days)
-    const [recentRegistrations] = await pool.execute(`
-      SELECT COUNT(*) as recent 
-      FROM general_users 
-      WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) 
-      AND status != 0
-    `);
-    
-    // Get user type distribution
-    const [userTypeDistribution] = await pool.execute(`
-      SELECT user_type, COUNT(*) as count 
-      FROM general_users 
-      GROUP BY user_type
-    `);
-
-    res.json({
-      success: true,
-      stats: {
-        total: totalResult[0].total,
-        active: activeResult[0].active,
-        inactive: inactiveResult[0].inactive,
-        recentRegistrations: recentRegistrations[0].recent,
-        userTypeDistribution
-      }
-    });
-    
-  } catch (error) {
-    console.error('Error fetching user statistics:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch user statistics',
-      error: error.message
-    });
-  }
-});
-
-// GET - Export users data (must be before /:id route)
-router.get('/export/csv', async (req, res) => {
-  try {
-    console.log('Exporting users data...');
-    
-    const [users] = await pool.execute(`
-      SELECT 
-        user_id as id,
-        CONCAT(first_name, ' ', last_name) as name,
-        email,
-        user_type,
-        status,
-        created_at,
-        updated_at as last_login
-      FROM general_users 
-      WHERE status != 0
-      ORDER BY created_at DESC
-    `);
-    
-    // Convert to CSV format
-    const csvHeader = 'ID,Name,Email,User Type,Status,Registration Date,Last Login\n';
-    const csvData = users.map(user => {
-      return [
-        user.id,
-        `"${user.name}"`,
-        user.email,
-        user.user_type || '',
-        user.status,
-        user.created_at ? new Date(user.created_at).toISOString().split('T')[0] : '',
-        user.last_login ? new Date(user.last_login).toISOString().split('T')[0] : 'Never'
-      ].join(',');
-    }).join('\n');
-    
-    const csv = csvHeader + csvData;
-    
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', 'attachment; filename=users_export.csv');
-    res.send(csv);
-    
-  } catch (error) {
-    console.error('Error exporting users data:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to export users data',
-      error: error.message
-    });
-  }
-});
-
 // GET - Get user by ID
 router.get('/:id', async (req, res) => {
   try {
@@ -404,19 +291,24 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-// DELETE - Delete user (soft delete)
+// DELETE - Delete user (hard delete from database)
 router.delete('/:id', async (req, res) => {
+  const connection = await pool.getConnection();
+  
   try {
+    await connection.beginTransaction();
+    
     const { id } = req.params;
     console.log('Deleting user:', id);
     
     // Check if user exists
-    const [existingUsers] = await pool.execute(
+    const [existingUsers] = await connection.execute(
       'SELECT user_id, CONCAT(first_name, " ", last_name) as name FROM general_users WHERE user_id = ?',
       [id]
     );
     
     if (existingUsers.length === 0) {
+      await connection.rollback();
       return res.status(404).json({
         success: false,
         message: 'User not found'
@@ -425,13 +317,7 @@ router.delete('/:id', async (req, res) => {
     
     const user = existingUsers[0];
     
-    // Soft delete - update status to 0 (inactive)
-    await pool.execute(
-      'UPDATE general_users SET status = 0, updated_at = NOW() WHERE user_id = ?',
-      [id]
-    );
-    
-    // Log the deletion
+    // Get admin_id for logging
     const { created_by } = req.body;
     const finalCreatedBy = created_by !== null && created_by !== undefined
       ? created_by
@@ -439,21 +325,150 @@ router.delete('/:id', async (req, res) => {
 
     console.log('Final created_by value to be inserted:', finalCreatedBy);
 
-    await pool.execute(`
+    // Log the deletion BEFORE deleting (so we have the user info)
+    await connection.execute(`
       INSERT INTO activity_logs (admin_id, action, details, created_at)
       VALUES (?, 'user_delete', ?, NOW())
     `, [finalCreatedBy, `Deleted user ${id} (${user.name})`]);
     
+    // Hard delete - actually DELETE from database
+    // Note: Foreign key constraint will CASCADE delete related incident_reports
+    await connection.execute(
+      'DELETE FROM general_users WHERE user_id = ?',
+      [id]
+    );
+    
+    await connection.commit();
+    
     res.json({
       success: true,
-      message: 'User deleted successfully'
+      message: 'User deleted successfully from database'
     });
     
   } catch (error) {
+    await connection.rollback();
     console.error('Error deleting user:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to delete user',
+      error: error.message
+    });
+  } finally {
+    connection.release();
+  }
+});
+
+// GET - Get user statistics
+router.get('/stats/overview', async (req, res) => {
+  try {
+    console.log('Fetching user statistics...');
+    
+    // Get total users count
+    const [totalResult] = await pool.execute(
+      'SELECT COUNT(*) as total FROM general_users'
+    );
+    
+    // Get active users count
+    const [activeResult] = await pool.execute(
+      'SELECT COUNT(*) as active FROM general_users WHERE status = 1'
+    );
+    
+    // Get inactive users count
+    const [inactiveResult] = await pool.execute(
+      'SELECT COUNT(*) as inactive FROM general_users WHERE status = 0'
+    );
+    
+    // Get users by type
+    const [userTypeStats] = await pool.execute(`
+      SELECT user_type, COUNT(*) as count 
+      FROM general_users 
+      GROUP BY user_type 
+      ORDER BY count DESC
+    `);
+    
+    // Get recent registrations (last 30 days)
+    const [recentRegistrations] = await pool.execute(`
+      SELECT COUNT(*) as recent 
+      FROM users 
+      WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) 
+      AND status != "deleted"
+    `);
+    
+    // Get user type distribution
+    const [userTypeDistribution] = await pool.execute(`
+      SELECT user_type, COUNT(*) as count 
+      FROM general_users 
+      GROUP BY user_type
+    `);
+
+    res.json({
+      success: true,
+      stats: {
+        total: totalResult[0].total,
+        active: activeResult[0].active,
+        inactive: inactiveResult[0].inactive,
+        recentRegistrations: recentRegistrations[0].recent,
+        userTypeDistribution
+      }
+    });
+    
+  } catch (error) {
+    console.error('Error fetching user statistics:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch user statistics',
+      error: error.message
+    });
+  }
+});
+
+// GET - Export users data
+router.get('/export/csv', async (req, res) => {
+  try {
+    console.log('Exporting users data...');
+    
+    const [users] = await pool.execute(`
+      SELECT 
+        user_id as id,
+        CONCAT(first_name, ' ', last_name) as name,
+        email,
+        user_type,
+        department,
+        college,
+        status,
+        created_at,
+        updated_at as last_login
+      FROM general_users 
+      WHERE status != 0
+      ORDER BY created_at DESC
+    `);
+    
+    // Convert to CSV format
+    const csvHeader = 'ID,Name,Email,Phone,Barangay,Status,Registration Date,Last Login\n';
+    const csvData = users.map(user => {
+      return [
+        user.id,
+        `"${user.name}"`,
+        user.email,
+        user.phone || '',
+        `"${user.barangay || ''}"`,
+        user.status,
+        user.created_at ? new Date(user.created_at).toISOString().split('T')[0] : '',
+        user.last_login ? new Date(user.last_login).toISOString().split('T')[0] : 'Never'
+      ].join(',');
+    }).join('\n');
+    
+    const csv = csvHeader + csvData;
+    
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename=users_export.csv');
+    res.send(csv);
+    
+  } catch (error) {
+    console.error('Error exporting users data:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to export users data',
       error: error.message
     });
   }
