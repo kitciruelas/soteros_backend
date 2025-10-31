@@ -5,6 +5,16 @@ const pool = require('../config/conn');
 // GET - Get all teams
 router.get('/', async (req, res) => {
   try {
+    const { page = 1, limit = 50 } = req.query;
+    
+    console.log('Fetching teams with pagination:', { page, limit });
+    
+    // Get total count
+    const [countResult] = await pool.execute(`SELECT COUNT(*) as total FROM teams`);
+    const total = countResult[0].total;
+    
+    // Get paginated results
+    const offset = (page - 1) * limit;
     const [teams] = await pool.execute(`
       SELECT 
         t.id, 
@@ -24,13 +34,20 @@ router.get('/', async (req, res) => {
         GROUP BY s.assigned_team_id
       ) staff_counts ON t.id = staff_counts.assigned_team_id
       ORDER BY t.name ASC
-    `);
+      LIMIT ? OFFSET ?
+    `, [parseInt(limit), parseInt(offset)]);
     
-    console.log('Teams with member counts:', teams);
+    console.log('Teams with member counts:', teams.length, 'teams fetched');
     
     res.json({
       success: true,
-      teams
+      teams,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / limit)
+      }
     });
     
   } catch (error) {
