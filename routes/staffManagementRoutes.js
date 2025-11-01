@@ -5,8 +5,8 @@ const bcrypt = require('bcryptjs');
 const { sendStaffAccountCreationEmail } = require('../services/emailService');
 const { authenticateAdmin, authenticateStaff, authenticateAny } = require('../middleware/authMiddleware');
 
-// GET - Get all staff members
-router.get('/', authenticateAdmin, async (req, res) => {
+// GET - Get all staff members (admin and staff can access, but staff only see active members)
+router.get('/', authenticateAny, async (req, res) => {
   try {
     const { 
       page = 1, 
@@ -18,22 +18,27 @@ router.get('/', authenticateAdmin, async (req, res) => {
       team_id = 'all'
     } = req.query;
     
-    console.log('Fetching staff with filters:', { page, limit, search, status, availability, department, team_id });
+    console.log('Fetching staff with filters:', { page, limit, search, status, availability, department, team_id, userType: req.userType });
     
-    let whereClause = 'WHERE s.status = 1'; // Only active staff by default
+    // Staff users can only see active staff members
+    const isStaff = req.userType === 'staff';
+    let whereClause = 'WHERE 1=1'; // Start with flexible where clause
     let queryParams = [];
+    
+    // Staff always sees active members only, admin can filter
+    if (isStaff) {
+      whereClause += ' AND s.status = 1';
+    } else if (status !== 'all') {
+      // Admin filtering by specific status
+      const statusValue = status === 'active' ? 1 : 0;
+      whereClause += ' AND s.status = ?';
+      queryParams.push(statusValue);
+    }
     
     // Add search filter
     if (search) {
       whereClause += ' AND (s.name LIKE ? OR s.email LIKE ? OR s.position LIKE ? OR s.department LIKE ?)';
       queryParams.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
-    }
-
-    // Add status filter (active/inactive)
-    if (status !== 'all') {
-      const statusValue = status === 'active' ? 1 : 0;
-      whereClause += ' AND s.status = ?';
-      queryParams.push(statusValue);
     }
 
     // Add availability filter
@@ -82,6 +87,17 @@ router.get('/', authenticateAdmin, async (req, res) => {
     
     res.json({
       success: true,
+      data: {
+        users: mappedStaff,
+        pagination: {
+          currentPage: parseInt(page),
+          totalPages: Math.ceil(total / limit),
+          total,
+          hasNext: parseInt(page) < Math.ceil(total / limit),
+          hasPrev: parseInt(page) > 1
+        }
+      },
+      // Also include legacy format for backward compatibility
       staff: mappedStaff,
       pagination: {
         page: parseInt(page),

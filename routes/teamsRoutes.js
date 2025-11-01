@@ -1,10 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../config/conn');
-const { authenticateAdmin } = require('../middleware/authMiddleware');
+const { authenticateAdmin, authenticateAny } = require('../middleware/authMiddleware');
 
-// GET - Get all teams
-router.get('/', authenticateAdmin, async (req, res) => {
+// GET - Get all teams (admin and staff can access)
+router.get('/', authenticateAny, async (req, res) => {
   try {
     const { page = 1, limit = 50 } = req.query;
     
