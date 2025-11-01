@@ -102,10 +102,24 @@ router.get('/', authenticateAdmin, async (req, res) => {
 });
 
 // GET - Get staff member by ID
-router.get('/:id', authenticateAdmin, async (req, res) => {
+// Allow staff to access their own profile, or admin to access any staff profile
+router.get('/:id', authenticateAny, async (req, res) => {
   try {
     const { id } = req.params;
-    console.log('Fetching staff member with ID:', id);
+    console.log('Fetching staff member with ID:', id, 'User type:', req.userType, 'User ID:', req.user?.id || req.user?.admin_id || req.user?.staff_id);
+    
+    // Authorization check: Staff can only access their own profile, admin can access any
+    const isAdmin = req.userType === 'admin';
+    const isStaff = req.userType === 'staff';
+    // For staff, the id field should match the staff member's id
+    const isAccessingSelf = isStaff && parseInt(req.user.id) === parseInt(id);
+    
+    if (!isAdmin && !isAccessingSelf) {
+      return res.status(403).json({
+        success: false,
+        message: 'You can only access your own profile'
+      });
+    }
     
     const [staff] = await pool.execute(
       `SELECT s.id, s.name, s.email, s.phone, s.position, s.department, s.status, s.availability,
