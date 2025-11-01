@@ -6,7 +6,8 @@ const { sendStaffAccountCreationEmail } = require('../services/emailService');
 const { authenticateAdmin, authenticateStaff, authenticateAny } = require('../middleware/authMiddleware');
 
 // GET - Get all staff members
-router.get('/', authenticateAdmin, async (req, res) => {
+// Allow both admin and staff to access (staff can view all staff)
+router.get('/', authenticateAny, async (req, res) => {
   try {
     const { 
       page = 1, 
@@ -243,7 +244,8 @@ router.post('/', authenticateAdmin, async (req, res) => {
 });
 
 // PUT - Update staff member
-router.put('/:id', authenticateAdmin, async (req, res) => {
+// Allow staff to update their own profile, or admin to update any staff
+router.put('/:id', authenticateAny, async (req, res) => {
   try {
     const { id } = req.params;
     const { name, email, phone, position, department, team_id } = req.body;
@@ -266,15 +268,44 @@ router.put('/:id', authenticateAdmin, async (req, res) => {
     
     const currentStaff = existingStaff[0];
     
-    // Use provided values or fall back to existing values
-    const updateData = {
-      name: name || currentStaff.name,
-      email: email || currentStaff.email,
-      phone: phone !== undefined ? phone : currentStaff.phone,
-      position: position || currentStaff.position,
-      department: department || currentStaff.department,
-      team_id: team_id !== undefined ? team_id : currentStaff.assigned_team_id
-    };
+    // Authorization check: Staff can only update their own profile, admin can update any
+    const isAdmin = req.userType === 'admin';
+    const isStaff = req.userType === 'staff';
+    // For staff, the id field should match the staff member's id
+    const isUpdatingSelf = isStaff && parseInt(req.user.id) === parseInt(id);
+    
+    if (!isAdmin && !isUpdatingSelf) {
+      return res.status(403).json({
+        success: false,
+        message: 'You can only update your own profile'
+      });
+    }
+    
+    // For staff updating themselves, restrict what they can change
+    // Staff can only update: name, email, phone (basic info)
+    // Admin can update everything including position, department, team_id
+    let updateData;
+    if (isStaff && isUpdatingSelf) {
+      // Staff can only update their own basic info
+      updateData = {
+        name: name || currentStaff.name,
+        email: email || currentStaff.email,
+        phone: phone !== undefined ? phone : currentStaff.phone,
+        position: currentStaff.position, // Staff cannot change position
+        department: currentStaff.department, // Staff cannot change department
+        team_id: currentStaff.assigned_team_id // Staff cannot change team
+      };
+    } else {
+      // Admin can update everything
+      updateData = {
+        name: name || currentStaff.name,
+        email: email || currentStaff.email,
+        phone: phone !== undefined ? phone : currentStaff.phone,
+        position: position || currentStaff.position,
+        department: department || currentStaff.department,
+        team_id: team_id !== undefined ? team_id : currentStaff.assigned_team_id
+      };
+    }
     
     // Validate required fields
     if (!updateData.name || !updateData.email || !updateData.position || !updateData.department) {
@@ -313,10 +344,17 @@ router.put('/:id', authenticateAdmin, async (req, res) => {
     // Log the update (optional - don't fail if logging fails)
     try {
       const clientIP = req.headers['x-forwarded-for'] || req.connection.remoteAddress || req.ip || 'unknown';
-      await pool.execute(`
-        INSERT INTO activity_logs (staff_id, action, details, ip_address, created_at)
-        VALUES (?, 'staff_update', ?, ?, NOW())
-      `, [id, `Updated staff member ${currentStaff.name} information`, clientIP]);
+      if (isAdmin) {
+        await pool.execute(`
+          INSERT INTO activity_logs (admin_id, action, details, ip_address, created_at)
+          VALUES (?, 'staff_update', ?, ?, NOW())
+        `, [req.user.admin_id || req.user.id, `Updated staff member ${currentStaff.name} information`, clientIP]);
+      } else {
+        await pool.execute(`
+          INSERT INTO activity_logs (staff_id, action, details, ip_address, created_at)
+          VALUES (?, 'staff_update', ?, ?, NOW())
+        `, [id, `Updated own profile information`, clientIP]);
+      }
       console.log('✅ Activity logged: staff_update');
     } catch (logError) {
       console.error('❌ Failed to log staff update activity:', logError.message);
