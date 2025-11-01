@@ -173,7 +173,12 @@ const authenticateStaff = async (req, res, next) => {
     try {
         const authHeader = req.headers.authorization;
 
+        console.log('🔐 AuthenticateStaff middleware called');
+        console.log('🔐 Request URL:', req.originalUrl);
+        console.log('🔐 Request method:', req.method);
+
         if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            console.log('❌ No valid authorization header found');
             return res.status(401).json({
                 success: false,
                 message: 'Access token required'
@@ -181,6 +186,7 @@ const authenticateStaff = async (req, res, next) => {
         }
 
         const token = authHeader.substring(7); // Remove 'Bearer ' prefix
+        console.log('🔐 Token extracted:', token.substring(0, 20) + '...');
 
         // Verify JWT token
         if (!process.env.JWT_SECRET) {
@@ -191,9 +197,11 @@ const authenticateStaff = async (req, res, next) => {
             });
         }
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        console.log('🔐 Token decoded successfully:', { id: decoded.id, type: decoded.type });
 
         // Check if token is for staff type
         if (decoded.type !== 'staff') {
+            console.log('❌ Invalid token type for staff access:', decoded.type);
             return res.status(403).json({
                 success: false,
                 message: 'Invalid token type for staff access'
@@ -201,12 +209,15 @@ const authenticateStaff = async (req, res, next) => {
         }
 
         // Get staff details from database
+        console.log('🔐 Querying database for staff ID:', decoded.id);
         const [staff] = await pool.execute(
             'SELECT * FROM staff WHERE id = ? AND status = 1',
             [decoded.id]
         );
+        console.log('🔐 Database query result:', staff.length, 'staff found');
 
         if (staff.length === 0) {
+            console.log('❌ No staff found in database');
             return res.status(401).json({
                 success: false,
                 message: 'Staff member not found, inactive, or unavailable'
@@ -215,12 +226,18 @@ const authenticateStaff = async (req, res, next) => {
 
         // Attach staff to request object
         req.staff = staff[0];
+        // Also set req.user for compatibility with routes that expect it
+        req.user = staff[0];
+        console.log('✅ Staff authenticated successfully:', req.staff.id);
         next();
 
     } catch (error) {
-        console.error('Staff authentication error:', error);
+        console.error('❌ Staff authentication error:', error);
+        console.error('❌ Error name:', error.name);
+        console.error('❌ Error message:', error.message);
 
         if (error.name === 'JsonWebTokenError') {
+            console.log('❌ JWT verification failed - invalid token');
             return res.status(401).json({
                 success: false,
                 message: 'Invalid token'
@@ -228,12 +245,14 @@ const authenticateStaff = async (req, res, next) => {
         }
 
         if (error.name === 'TokenExpiredError') {
+            console.log('❌ JWT verification failed - token expired');
             return res.status(401).json({
                 success: false,
                 message: 'Token expired'
             });
         }
 
+        console.log('❌ Other authentication error occurred');
         res.status(500).json({
             success: false,
             message: 'Authentication error'
