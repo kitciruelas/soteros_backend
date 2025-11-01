@@ -339,9 +339,9 @@ router.get('/reports', authenticateAdmin, async (req, res) => {
       queryParams.push(settingId);
       whereConditions.push('gu.status = 1'); // Only active users
       
-      // When filtering by setting_id, we can still filter by status, but include users without reports
+      // When filtering by status with setting_id, show only users with reports matching that status
       if (status && ['safe', 'needs_help'].includes(status)) {
-        whereConditions.push('(wr.status = ? OR wr.status IS NULL)');
+        whereConditions.push('wr.status = ?');
         queryParams.push(status);
       }
     } else {
@@ -357,8 +357,11 @@ router.get('/reports', authenticateAdmin, async (req, res) => {
       ) wr ON gu.user_id = wr.user_id`;
       whereConditions.push('gu.status = 1'); // Only active users
       
-      // Note: Status filter is not applied here to show ALL users regardless of report status
-      // If status filtering is needed, it should be handled in the frontend or as a separate filter option
+      // Apply status filter if provided - only show users with reports matching the status
+      if (status && ['safe', 'needs_help'].includes(status)) {
+        whereConditions.push('wr.status = ?');
+        queryParams.push(status);
+      }
     }
 
     if (whereConditions.length > 0) {
@@ -393,7 +396,7 @@ router.get('/reports', authenticateAdmin, async (req, res) => {
         countParams.push(settingId);
         
         if (status && ['safe', 'needs_help'].includes(status)) {
-          countQuery += ' AND (wr.status = ? OR wr.status IS NULL)';
+          countQuery += ' AND wr.status = ?';
           countParams.push(status);
         }
       } else {
@@ -410,6 +413,11 @@ router.get('/reports', authenticateAdmin, async (req, res) => {
                       ) wr ON gu.user_id = wr.user_id
                       WHERE gu.status = 1`;
         countParams = [];
+        
+        if (status && ['safe', 'needs_help'].includes(status)) {
+          countQuery += ' AND wr.status = ?';
+          countParams.push(status);
+        }
       }
 
       [countResult] = await db.execute(countQuery, countParams);
