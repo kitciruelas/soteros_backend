@@ -140,6 +140,8 @@ const authenticateAdmin = async (req, res, next) => {
 
         // Attach admin to request object
         req.admin = admins[0];
+        // Also set req.user for compatibility with routes that expect it
+        req.user = admins[0];
         next();
 
     } catch (error) {

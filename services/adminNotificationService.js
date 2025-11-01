@@ -269,6 +269,11 @@ class AdminNotificationService {
       severity = null
     } = options;
 
+    // Validate adminId
+    if (!adminId || adminId === null || adminId === undefined) {
+      throw new Error('Admin ID is required');
+    }
+
     const offset = (page - 1) * limit;
     let whereConditions = ['(admin_id = ? OR admin_id IS NULL)'];
     let params = [adminId];
@@ -334,16 +339,33 @@ class AdminNotificationService {
     );
 
     return {
-      notifications: notifications.map(n => ({
-        ...n,
-        metadata: n.metadata ? JSON.parse(n.metadata) : null
-      })),
-      total: countResult[0].total,
-      unreadCount: unreadResult[0].unread,
+      notifications: notifications.map(n => {
+        let parsedMetadata = null;
+        if (n.metadata) {
+          try {
+            // Handle both string and object metadata
+            if (typeof n.metadata === 'string') {
+              parsedMetadata = JSON.parse(n.metadata);
+            } else if (typeof n.metadata === 'object') {
+              parsedMetadata = n.metadata;
+            }
+          } catch (parseError) {
+            console.warn('⚠️ Failed to parse notification metadata:', parseError);
+            // If parsing fails, return null instead of crashing
+            parsedMetadata = null;
+          }
+        }
+        return {
+          ...n,
+          metadata: parsedMetadata
+        };
+      }),
+      total: countResult[0]?.total || 0,
+      unreadCount: unreadResult[0]?.unread || 0,
       pagination: {
         currentPage: page,
-        totalPages: Math.ceil(countResult[0].total / limit),
-        totalItems: countResult[0].total,
+        totalPages: Math.ceil((countResult[0]?.total || 0) / limit),
+        totalItems: countResult[0]?.total || 0,
         itemsPerPage: limit
       }
     };

@@ -9,7 +9,18 @@ const AdminNotificationService = require('../services/adminNotificationService')
  */
 router.get('/', authenticateAdmin, async (req, res) => {
   try {
-    const adminId = req.user.admin_id || req.user.id;
+    const adminId = req.admin?.admin_id || req.user?.admin_id || req.user?.id || req.admin?.id;
+    
+    // Validate adminId exists
+    if (!adminId) {
+      console.error('❌ Admin ID not found in request. req.admin:', req.admin, 'req.user:', req.user);
+      return res.status(400).json({
+        success: false,
+        message: 'Admin ID not found in authentication token',
+        error: 'Invalid authentication data'
+      });
+    }
+
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
     const unreadOnly = req.query.unread_only === 'true';
@@ -30,6 +41,7 @@ router.get('/', authenticateAdmin, async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Error fetching admin notifications:', error);
+    console.error('Error stack:', error.stack);
     
     // If table doesn't exist, return empty results
     if (error.code === 'ER_NO_SUCH_TABLE') {
@@ -42,7 +54,7 @@ router.get('/', authenticateAdmin, async (req, res) => {
           currentPage: 1,
           totalPages: 0,
           totalItems: 0,
-          itemsPerPage: limit
+          itemsPerPage: parseInt(req.query.limit) || 20
         },
         message: 'Notifications table not yet created. Please run the SQL migration.'
       });
@@ -51,7 +63,8 @@ router.get('/', authenticateAdmin, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch admin notifications',
-      error: error.message
+      error: error.message,
+      code: error.code
     });
   }
 });
@@ -62,7 +75,7 @@ router.get('/', authenticateAdmin, async (req, res) => {
  */
 router.get('/unread-count', authenticateAdmin, async (req, res) => {
   try {
-    const adminId = req.user.admin_id || req.user.id;
+    const adminId = req.admin?.admin_id || req.user?.admin_id || req.user?.id || req.admin?.id;
     const count = await AdminNotificationService.getUnreadCount(adminId);
 
     res.json({
@@ -93,7 +106,7 @@ router.get('/unread-count', authenticateAdmin, async (req, res) => {
  */
 router.get('/priority-count', authenticateAdmin, async (req, res) => {
   try {
-    const adminId = req.user.admin_id || req.user.id;
+    const adminId = req.admin?.admin_id || req.user?.admin_id || req.user?.id || req.admin?.id;
     const count = await AdminNotificationService.getPriorityNotifications(adminId);
 
     res.json({
@@ -125,7 +138,7 @@ router.get('/priority-count', authenticateAdmin, async (req, res) => {
 router.put('/:id/read', authenticateAdmin, async (req, res) => {
   try {
     const notificationId = req.params.id;
-    const adminId = req.user.admin_id || req.user.id;
+    const adminId = req.admin?.admin_id || req.user?.admin_id || req.user?.id || req.admin?.id;
 
     const success = await AdminNotificationService.markAsRead(notificationId, adminId);
 
@@ -164,7 +177,7 @@ router.put('/:id/read', authenticateAdmin, async (req, res) => {
  */
 router.put('/read-all', authenticateAdmin, async (req, res) => {
   try {
-    const adminId = req.user.admin_id || req.user.id;
+    const adminId = req.admin?.admin_id || req.user?.admin_id || req.user?.id || req.admin?.id;
     const count = await AdminNotificationService.markAllAsRead(adminId);
 
     res.json({
@@ -198,7 +211,7 @@ router.put('/read-all', authenticateAdmin, async (req, res) => {
 router.delete('/:id', authenticateAdmin, async (req, res) => {
   try {
     const notificationId = req.params.id;
-    const adminId = req.user.admin_id || req.user.id;
+    const adminId = req.admin?.admin_id || req.user?.admin_id || req.user?.id || req.admin?.id;
 
     const success = await AdminNotificationService.deleteNotification(notificationId, adminId);
 
