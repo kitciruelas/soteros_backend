@@ -259,12 +259,13 @@ router.post('/', authenticateAdmin, async (req, res) => {
 });
 
 // PUT - Update staff member
-router.put('/:id', authenticateAdmin, async (req, res) => {
+// Allow staff to update their own profile, or admin to update any staff
+router.put('/:id', authenticateAny, async (req, res) => {
   try {
     const { id } = req.params;
     const { name, email, phone, position, department, team_id } = req.body;
     
-    console.log('Updating staff member:', { id, name, email, team_id });
+    console.log('Updating staff member:', { id, name, email, team_id, userType: req.userType, userId: req.user?.id || req.user?.admin_id || req.user?.staff_id });
     console.log('Request body:', req.body);
     
     // Check if staff member exists first
@@ -281,6 +282,27 @@ router.put('/:id', authenticateAdmin, async (req, res) => {
     }
     
     const currentStaff = existingStaff[0];
+    
+    // Authorization check: Staff can only update their own profile, admin can update any
+    const isAdmin = req.userType === 'admin';
+    const isStaff = req.userType === 'staff';
+    // For staff, the id field should match the staff member's id
+    const isUpdatingSelf = isStaff && parseInt(req.user.id) === parseInt(id);
+    
+    if (!isAdmin && !isUpdatingSelf) {
+      return res.status(403).json({
+        success: false,
+        message: 'You can only update your own profile'
+      });
+    }
+    
+    // Staff cannot update team_id, only admin can
+    if (!isAdmin && team_id !== undefined) {
+      return res.status(403).json({
+        success: false,
+        message: 'You do not have permission to update team assignment'
+      });
+    }
     
     // Use provided values or fall back to existing values
     const updateData = {
@@ -329,10 +351,17 @@ router.put('/:id', authenticateAdmin, async (req, res) => {
     // Log the update (optional - don't fail if logging fails)
     try {
       const clientIP = req.headers['x-forwarded-for'] || req.connection.remoteAddress || req.ip || 'unknown';
-      await pool.execute(`
-        INSERT INTO activity_logs (staff_id, action, details, ip_address, created_at)
-        VALUES (?, 'staff_update', ?, ?, NOW())
-      `, [id, `Updated staff member ${currentStaff.name} information`, clientIP]);
+      if (isAdmin) {
+        await pool.execute(`
+          INSERT INTO activity_logs (admin_id, action, details, ip_address, created_at)
+          VALUES (?, 'staff_update', ?, ?, NOW())
+        `, [req.user.admin_id || req.user.id, `Updated staff member ${currentStaff.name} information`, clientIP]);
+      } else {
+        await pool.execute(`
+          INSERT INTO activity_logs (staff_id, action, details, ip_address, created_at)
+          VALUES (?, 'staff_update', ?, ?, NOW())
+        `, [id, `Updated own profile information`, clientIP]);
+      }
       console.log('✅ Activity logged: staff_update');
     } catch (logError) {
       console.error('❌ Failed to log staff update activity:', logError.message);
