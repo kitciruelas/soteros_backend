@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../config/conn');
 const { sendIncidentAssignmentEmail, sendStaffAssignmentEmail } = require('../services/emailService');
-const { authenticateUser, authenticateAdmin, authenticateStaff } = require('../middleware/authMiddleware');
+const { authenticateUser, authenticateAdmin, authenticateStaff, authenticateAny } = require('../middleware/authMiddleware');
 const NotificationService = require('../services/notificationService');
 const AdminNotificationService = require('../services/adminNotificationService');
 const path = require('path');
@@ -1739,8 +1739,8 @@ router.put('/:id/assign-staff', authenticateAdmin, async (req, res) => {
   }
 });
 
-// PUT - Update incident status (for staff use)
-router.put('/:id/update-status', authenticateStaff, async (req, res) => {
+// PUT - Update incident status (for any authenticated user: staff, admin, or user)
+router.put('/:id/update-status', authenticateAny, async (req, res) => {
   try {
     const { id } = req.params;
     const { status, notes } = req.body;
@@ -1800,18 +1800,49 @@ router.put('/:id/update-status', authenticateStaff, async (req, res) => {
     if (incident.status !== status) {
       try {
         const { created_by } = req.body;
-        const finalCreatedBy = created_by !== null && created_by !== undefined
-          ? created_by
-          : (req.staff?.id || req.admin?.admin_id || req.user?.id || null);
+        const userType = req.userType || 'unknown';
+        let finalCreatedBy = created_by;
+        
+        // Determine the user ID based on user type
+        if (finalCreatedBy === null || finalCreatedBy === undefined) {
+          if (userType === 'staff') {
+            finalCreatedBy = req.user?.id || req.staff?.id || null;
+          } else if (userType === 'admin') {
+            finalCreatedBy = req.user?.admin_id || req.admin?.admin_id || null;
+          } else if (userType === 'user') {
+            finalCreatedBy = req.user?.user_id || req.user?.id || null;
+          } else {
+            finalCreatedBy = req.user?.id || req.staff?.id || req.admin?.admin_id || null;
+          }
+        }
 
-        console.log('Final created_by value to be inserted:', finalCreatedBy);
+        console.log('Final created_by value to be inserted:', finalCreatedBy, 'User type:', userType);
 
         const clientIP = req.headers['x-forwarded-for'] || req.connection.remoteAddress || req.ip || 'unknown';
 
-        await pool.execute(`
-          INSERT INTO activity_logs (staff_id, action, details, ip_address, created_at)
-          VALUES (?, 'incident_status_update', ?, ?, NOW())
-        `, [finalCreatedBy, `Incident #${id} status changed from "${incident.status}" to "${status}"`, clientIP]);
+        // Log activity with appropriate field based on user type
+        if (userType === 'staff') {
+          await pool.execute(`
+            INSERT INTO activity_logs (staff_id, action, details, ip_address, created_at)
+            VALUES (?, 'incident_status_update', ?, ?, NOW())
+          `, [finalCreatedBy, `Incident #${id} status changed from "${incident.status}" to "${status}" by staff`, clientIP]);
+        } else if (userType === 'admin') {
+          await pool.execute(`
+            INSERT INTO activity_logs (admin_id, action, details, ip_address, created_at)
+            VALUES (?, 'incident_status_update', ?, ?, NOW())
+          `, [finalCreatedBy, `Incident #${id} status changed from "${incident.status}" to "${status}" by admin`, clientIP]);
+        } else if (userType === 'user') {
+          await pool.execute(`
+            INSERT INTO activity_logs (general_user_id, action, details, ip_address, created_at)
+            VALUES (?, 'incident_status_update', ?, ?, NOW())
+          `, [finalCreatedBy, `Incident #${id} status changed from "${incident.status}" to "${status}" by user`, clientIP]);
+        } else {
+          // Fallback: try staff_id first
+          await pool.execute(`
+            INSERT INTO activity_logs (staff_id, action, details, ip_address, created_at)
+            VALUES (?, 'incident_status_update', ?, ?, NOW())
+          `, [finalCreatedBy, `Incident #${id} status changed from "${incident.status}" to "${status}"`, clientIP]);
+        }
         console.log('✅ Activity logged: incident_status_update');
       } catch (logError) {
         console.error('❌ Failed to log status update activity:', logError.message);
