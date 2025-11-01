@@ -1756,6 +1756,14 @@ router.put('/:id/update-status', authenticateStaff, async (req, res) => {
       });
     }
 
+    // Validate notes - required field
+    if (!notes || !notes.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Remarks are required when updating incident status'
+      });
+    }
+
     // Check if incident exists
     const [incidents] = await pool.execute(
       'SELECT * FROM incident_reports WHERE incident_id = ?',
@@ -1782,10 +1790,10 @@ router.put('/:id/update-status', authenticateStaff, async (req, res) => {
       });
     }
 
-    // Update incident status
+    // Update incident status and remarks
     await pool.execute(
-      'UPDATE incident_reports SET status = ?, updated_at = NOW() WHERE incident_id = ?',
-      [status, id]
+      'UPDATE incident_reports SET status = ?, remarks = ?, updated_at = NOW() WHERE incident_id = ?',
+      [status, notes, id]
     );
 
     // Log status update activity (only if status actually changed)
