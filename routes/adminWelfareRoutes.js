@@ -322,7 +322,7 @@ router.delete('/settings', authenticateAdmin, async (req, res) => {
 router.get('/reports', authenticateAdmin, async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
+    const limit = parseInt(req.query.limit) || 1000; // Increased limit to show all users
     const offset = (page - 1) * limit;
     const status = req.query.status; // Filter by status if provided
     const settingId = req.query.setting_id; // Filter by setting ID if provided
@@ -330,15 +330,35 @@ router.get('/reports', authenticateAdmin, async (req, res) => {
     let whereClause = '';
     let queryParams = [];
     let whereConditions = [];
+    let joinCondition = '';
 
-    if (status && ['safe', 'needs_help'].includes(status)) {
-      whereConditions.push('wr.status = ?');
-      queryParams.push(status);
-    }
-
+    // Build join condition based on setting_id filter
     if (settingId) {
-      whereConditions.push('wr.setting_id = ?');
+      // If filtering by setting_id, show all users but only show their report for that specific setting
+      joinCondition = `LEFT JOIN welfare_reports wr ON gu.user_id = wr.user_id AND wr.setting_id = ?`;
       queryParams.push(settingId);
+      whereConditions.push('gu.status = 1'); // Only active users
+      
+      // When filtering by setting_id, we can still filter by status, but include users without reports
+      if (status && ['safe', 'needs_help'].includes(status)) {
+        whereConditions.push('(wr.status = ? OR wr.status IS NULL)');
+        queryParams.push(status);
+      }
+    } else {
+      // No setting filter - get latest report for each user
+      joinCondition = `LEFT JOIN (
+        SELECT wr1.user_id, wr1.report_id, wr1.status, wr1.additional_info, wr1.submitted_at, wr1.setting_id
+        FROM welfare_reports wr1
+        INNER JOIN (
+          SELECT user_id, MAX(submitted_at) as max_submitted_at
+          FROM welfare_reports
+          GROUP BY user_id
+        ) wr2 ON wr1.user_id = wr2.user_id AND wr1.submitted_at = wr2.max_submitted_at
+      ) wr ON gu.user_id = wr.user_id`;
+      whereConditions.push('gu.status = 1'); // Only active users
+      
+      // Note: Status filter is not applied here to show ALL users regardless of report status
+      // If status filtering is needed, it should be handled in the frontend or as a separate filter option
     }
 
     if (whereConditions.length > 0) {
@@ -351,23 +371,48 @@ router.get('/reports', authenticateAdmin, async (req, res) => {
     let reports, countResult;
     try {
       [reports] = await db.execute(
-        `SELECT wr.report_id, wr.status, wr.additional_info, wr.submitted_at,
-                gu.first_name, gu.last_name, gu.email, gu.address, gu.city, gu.state, gu.zip_code
-         FROM welfare_reports wr
-         JOIN general_users gu ON wr.user_id = gu.user_id
+        `SELECT gu.user_id, gu.first_name, gu.last_name, gu.email, gu.address, gu.city, gu.state, gu.zip_code,
+                wr.report_id, wr.status, wr.additional_info, wr.submitted_at, wr.setting_id
+         FROM general_users gu
+         ${joinCondition}
          ${whereClause}
-         ORDER BY wr.submitted_at DESC
+         ORDER BY wr.submitted_at DESC, gu.first_name ASC, gu.last_name ASC
          LIMIT ? OFFSET ?`,
         queryParams
       );
 
-      [countResult] = await db.execute(
-        `SELECT COUNT(*) as total 
-         FROM welfare_reports wr
-         JOIN general_users gu ON wr.user_id = gu.user_id
-         ${whereClause}`,
-        whereConditions.length > 0 ? queryParams.slice(0, -2) : []
-      );
+      // Get count query - need to adjust based on join type
+      let countQuery = '';
+      let countParams = [];
+      
+      if (settingId) {
+        countQuery = `SELECT COUNT(*) as total 
+                      FROM general_users gu
+                      LEFT JOIN welfare_reports wr ON gu.user_id = wr.user_id AND wr.setting_id = ?
+                      WHERE gu.status = 1`;
+        countParams.push(settingId);
+        
+        if (status && ['safe', 'needs_help'].includes(status)) {
+          countQuery += ' AND (wr.status = ? OR wr.status IS NULL)';
+          countParams.push(status);
+        }
+      } else {
+        countQuery = `SELECT COUNT(*) as total 
+                      FROM general_users gu
+                      LEFT JOIN (
+                        SELECT wr1.user_id, wr1.report_id, wr1.status, wr1.additional_info, wr1.submitted_at, wr1.setting_id
+                        FROM welfare_reports wr1
+                        INNER JOIN (
+                          SELECT user_id, MAX(submitted_at) as max_submitted_at
+                          FROM welfare_reports
+                          GROUP BY user_id
+                        ) wr2 ON wr1.user_id = wr2.user_id AND wr1.submitted_at = wr2.max_submitted_at
+                      ) wr ON gu.user_id = wr.user_id
+                      WHERE gu.status = 1`;
+        countParams = [];
+      }
+
+      [countResult] = await db.execute(countQuery, countParams);
     } catch (tableError) {
       // If table doesn't exist, return empty results
       if (tableError.code === 'ER_NO_SUCH_TABLE') {
