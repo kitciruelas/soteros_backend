@@ -456,8 +456,9 @@ router.get('/reports', authenticateAdmin, async (req, res) => {
 // Get welfare check statistics (admin only) - alias for /stats
 router.get('/stats', authenticateAdmin, async (req, res) => {
   try {
-    let stats, recentReports;
+    let stats, recentReports, latestDistribution;
     try {
+      // Get total counts
       [stats] = await db.execute(`
         SELECT 
           COUNT(*) as total_reports,
@@ -467,6 +468,20 @@ router.get('/stats', authenticateAdmin, async (req, res) => {
           DATE(MIN(submitted_at)) as first_report_date,
           DATE(MAX(submitted_at)) as latest_report_date
         FROM welfare_reports
+      `);
+
+      // Get latest welfare status distribution (latest report per user)
+      [latestDistribution] = await db.execute(`
+        SELECT 
+          wr.status,
+          COUNT(*) as count
+        FROM welfare_reports wr
+        INNER JOIN (
+          SELECT user_id, MAX(submitted_at) as max_submitted_at
+          FROM welfare_reports
+          GROUP BY user_id
+        ) latest ON wr.user_id = latest.user_id AND wr.submitted_at = latest.max_submitted_at
+        GROUP BY wr.status
       `);
 
       [recentReports] = await db.execute(`
@@ -488,6 +503,7 @@ router.get('/stats', authenticateAdmin, async (req, res) => {
           first_report_date: null,
           latest_report_date: null
         }];
+        latestDistribution = [];
         recentReports = [];
       } else {
         throw tableError;
@@ -505,14 +521,18 @@ router.get('/stats', authenticateAdmin, async (req, res) => {
       console.log('Welfare settings table does not exist or error occurred');
     }
 
+    // Get counts from latest distribution
+    const latestSafeCount = latestDistribution.find(d => d.status === 'safe')?.count || 0;
+    const latestNeedsHelpCount = latestDistribution.find(d => d.status === 'needs_help')?.count || 0;
+
     res.json({
       success: true,
       stats: {
         totalSettings: settingsCount,
         activeSettings: activeSettingsCount,
         totalReports: stats[0].total_reports || 0,
-        safeReports: stats[0].safe_reports || 0,
-        needsHelpReports: stats[0].needs_help_reports || 0,
+        safeReports: latestSafeCount,
+        needsHelpReports: latestNeedsHelpCount,
         uniqueUsers: stats[0].unique_users || 0,
         firstReportDate: stats[0].first_report_date,
         latestReportDate: stats[0].latest_report_date
