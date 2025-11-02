@@ -112,6 +112,36 @@ router.post('/report', authenticateUser, uploadIncident.array('attachments', 5),
     // Get user ID from authenticated request
     const reportedBy = req.user.user_id;
 
+    // Check daily report limit (maximum 2 reports per day)
+    try {
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      
+      const [dailyReports] = await pool.execute(
+        `SELECT COUNT(*) as count 
+         FROM incident_reports 
+         WHERE reported_by = ? 
+         AND DATE(date_reported) = CURDATE()`,
+        [reportedBy]
+      );
+
+      const reportCount = dailyReports[0]?.count || 0;
+      console.log(`📊 Daily report count for user ${reportedBy}: ${reportCount}`);
+
+      if (reportCount >= 2) {
+        console.log('❌ Daily report limit reached for user');
+        return res.status(429).json({
+          success: false,
+          message: 'Daily submission limit reached. You have already submitted 2 incident reports today. Please try again tomorrow.',
+          errorCode: 'DAILY_LIMIT_EXCEEDED'
+        });
+      }
+    } catch (limitCheckError) {
+      console.error('❌ Error checking daily report limit:', limitCheckError.message);
+      // Continue with submission if limit check fails (fail-open strategy)
+      console.log('⚠️ Continuing with submission despite limit check error');
+    }
+
     // Prepare description
     let fullDescription = description;
     let attachmentUrls = null;
@@ -336,6 +366,40 @@ router.post('/report-guest', uploadIncident.array('attachments', 5), async (req,
         message: 'Invalid safety status. Must be one of: safe, injured, danger'
       });
     };
+
+    // Check daily report limit for guests by IP address (maximum 2 reports per day)
+    try {
+      const clientIP = req.headers['x-forwarded-for'] || req.connection.remoteAddress || req.ip || 'unknown';
+      
+      // Get IP address (handle forwarded IPs)
+      const actualIP = clientIP.split(',')[0].trim();
+      
+      // Count guest reports from this IP address today
+      const [guestReports] = await pool.execute(
+        `SELECT COUNT(*) as count
+         FROM activity_logs
+         WHERE ip_address = ?
+         AND action = 'guest_incident_report_submit'
+         AND DATE(created_at) = CURDATE()`,
+        [actualIP]
+      );
+
+      const reportCount = guestReports[0]?.count || 0;
+      console.log(`📊 Daily report count for IP ${actualIP}: ${reportCount}`);
+
+      if (reportCount >= 2) {
+        console.log('❌ Daily report limit reached for guest');
+        return res.status(429).json({
+          success: false,
+          message: 'Daily submission limit reached. You have already submitted 2 incident reports today. Please try again tomorrow.',
+          errorCode: 'DAILY_LIMIT_EXCEEDED'
+        });
+      }
+    } catch (limitCheckError) {
+      console.error('❌ Error checking daily report limit for guest:', limitCheckError.message);
+      // Continue with submission if limit check fails (fail-open strategy)
+      console.log('⚠️ Continuing with submission despite limit check error');
+    }
 
     // Use a transaction to ensure data consistency
     const connection = await pool.getConnection();
