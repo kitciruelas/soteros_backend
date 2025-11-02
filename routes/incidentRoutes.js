@@ -373,6 +373,7 @@ router.post('/report-guest', uploadIncident.array('attachments', 5), async (req,
       
       // Get IP address (handle forwarded IPs)
       const actualIP = clientIP.split(',')[0].trim();
+      console.log(`🔍 [IP CHECK] Raw IP: ${clientIP}, Extracted IP: ${actualIP}`);
       
       // Count guest reports from this IP address today
       const [guestReports] = await pool.execute(
@@ -386,6 +387,18 @@ router.post('/report-guest', uploadIncident.array('attachments', 5), async (req,
 
       const reportCount = guestReports[0]?.count || 0;
       console.log(`📊 Daily report count for IP ${actualIP}: ${reportCount}`);
+      
+      // Debug: Show all activity logs for this IP today
+      const [debugLogs] = await pool.execute(
+        `SELECT id, action, ip_address, details, created_at
+         FROM activity_logs
+         WHERE ip_address = ?
+         AND action = 'guest_incident_report_submit'
+         AND DATE(created_at) = CURDATE()
+         ORDER BY created_at DESC`,
+        [actualIP]
+      );
+      console.log(`🔍 Debug - Activity logs for IP ${actualIP}:`, JSON.stringify(debugLogs, null, 2));
 
       if (reportCount >= 2) {
         console.log('❌ Daily report limit reached for guest');
@@ -522,10 +535,13 @@ router.post('/report-guest', uploadIncident.array('attachments', 5), async (req,
     // Log guest incident report submission (non-critical operation)
     try {
       const clientIP = req.headers['x-forwarded-for'] || req.connection.remoteAddress || req.ip || 'unknown';
+      // Use same IP extraction logic as in limit check
+      const actualIP = clientIP.split(',')[0].trim();
+      console.log(`💾 [ACTIVITY LOG] Storing IP: ${actualIP} for guest incident report`);
       await pool.execute(`
         INSERT INTO activity_logs (general_user_id, action, details, ip_address, created_at)
         VALUES (NULL, 'guest_incident_report_submit', ?, ?, NOW())
-      `, [`Guest incident report submitted: ${incidentType} at ${location} by ${guestName}`, clientIP]);
+      `, [`Guest incident report submitted: ${incidentType} at ${location} by ${guestName}`, actualIP]);
       console.log('✅ [GUEST INCIDENT] Activity logged: guest_incident_report_submit');
     } catch (logError) {
       console.error('⚠️ [GUEST INCIDENT] Failed to log guest incident report activity (non-critical):', logError.message);
