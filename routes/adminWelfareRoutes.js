@@ -456,41 +456,109 @@ router.get('/reports', authenticateAdmin, async (req, res) => {
 // Get welfare check statistics (admin only) - alias for /stats
 router.get('/stats', authenticateAdmin, async (req, res) => {
   try {
-    let stats, recentReports, latestDistribution;
+    let stats, recentReports, latestDistribution, totalActiveUsers, activeSettingId;
+    
+    // Get settings count and active setting ID
+    let settingsCount = 0;
+    let activeSettingsCount = 0;
     try {
-      // Get total counts
-      [stats] = await db.execute(`
-        SELECT 
-          COUNT(*) as total_reports,
-          SUM(CASE WHEN status = 'safe' THEN 1 ELSE 0 END) as safe_reports,
-          SUM(CASE WHEN status = 'needs_help' THEN 1 ELSE 0 END) as needs_help_reports,
-          COUNT(DISTINCT user_id) as unique_users,
-          DATE(MIN(submitted_at)) as first_report_date,
-          DATE(MAX(submitted_at)) as latest_report_date
-        FROM welfare_reports
+      const [settingsResult] = await db.execute('SELECT COUNT(*) as total, SUM(is_active) as active FROM welfare_check_settings');
+      settingsCount = settingsResult[0].total || 0;
+      activeSettingsCount = settingsResult[0].active || 0;
+      
+      // Get the active setting ID
+      if (activeSettingsCount > 0) {
+        const [activeSetting] = await db.execute('SELECT id FROM welfare_check_settings WHERE is_active = 1 LIMIT 1');
+        activeSettingId = activeSetting[0]?.id || null;
+      }
+    } catch (settingsError) {
+      console.log('Welfare settings table does not exist or error occurred');
+    }
+
+    try {
+      // Get total counts (filtered by active setting if exists)
+      if (activeSettingId) {
+        [stats] = await db.execute(`
+          SELECT 
+            COUNT(*) as total_reports,
+            SUM(CASE WHEN status = 'safe' THEN 1 ELSE 0 END) as safe_reports,
+            SUM(CASE WHEN status = 'needs_help' THEN 1 ELSE 0 END) as needs_help_reports,
+            COUNT(DISTINCT user_id) as unique_users,
+            DATE(MIN(submitted_at)) as first_report_date,
+            DATE(MAX(submitted_at)) as latest_report_date
+          FROM welfare_reports wr
+          WHERE wr.setting_id = ?
+        `, [activeSettingId]);
+      } else {
+        [stats] = await db.execute(`
+          SELECT 
+            COUNT(*) as total_reports,
+            SUM(CASE WHEN status = 'safe' THEN 1 ELSE 0 END) as safe_reports,
+            SUM(CASE WHEN status = 'needs_help' THEN 1 ELSE 0 END) as needs_help_reports,
+            COUNT(DISTINCT user_id) as unique_users,
+            DATE(MIN(submitted_at)) as first_report_date,
+            DATE(MAX(submitted_at)) as latest_report_date
+          FROM welfare_reports wr
+        `);
+      }
+
+      // Get latest welfare status distribution (latest report per user, filtered by active setting)
+      if (activeSettingId) {
+        [latestDistribution] = await db.execute(`
+          SELECT 
+            wr.status,
+            COUNT(*) as count
+          FROM welfare_reports wr
+          INNER JOIN (
+            SELECT user_id, MAX(submitted_at) as max_submitted_at
+            FROM welfare_reports
+            WHERE setting_id = ?
+            GROUP BY user_id
+          ) latest ON wr.user_id = latest.user_id AND wr.submitted_at = latest.max_submitted_at
+          WHERE wr.setting_id = ?
+          GROUP BY wr.status
+        `, [activeSettingId, activeSettingId]);
+      } else {
+        [latestDistribution] = await db.execute(`
+          SELECT 
+            wr.status,
+            COUNT(*) as count
+          FROM welfare_reports wr
+          INNER JOIN (
+            SELECT user_id, MAX(submitted_at) as max_submitted_at
+            FROM welfare_reports
+            GROUP BY user_id
+          ) latest ON wr.user_id = latest.user_id AND wr.submitted_at = latest.max_submitted_at
+          GROUP BY wr.status
+        `);
+      }
+
+      // Get total active users
+      [totalActiveUsers] = await db.execute(`
+        SELECT COUNT(*) as count
+        FROM general_users
+        WHERE status = 1
       `);
 
-      // Get latest welfare status distribution (latest report per user)
-      [latestDistribution] = await db.execute(`
-        SELECT 
-          wr.status,
-          COUNT(*) as count
-        FROM welfare_reports wr
-        INNER JOIN (
-          SELECT user_id, MAX(submitted_at) as max_submitted_at
-          FROM welfare_reports
-          GROUP BY user_id
-        ) latest ON wr.user_id = latest.user_id AND wr.submitted_at = latest.max_submitted_at
-        GROUP BY wr.status
-      `);
-
-      [recentReports] = await db.execute(`
-        SELECT wr.status, wr.submitted_at, gu.first_name, gu.last_name
-        FROM welfare_reports wr
-        JOIN general_users gu ON wr.user_id = gu.user_id
-        ORDER BY wr.submitted_at DESC
-        LIMIT 10
-      `);
+      // Get recent reports (filtered by active setting if exists)
+      if (activeSettingId) {
+        [recentReports] = await db.execute(`
+          SELECT wr.status, wr.submitted_at, gu.first_name, gu.last_name
+          FROM welfare_reports wr
+          JOIN general_users gu ON wr.user_id = gu.user_id
+          WHERE wr.setting_id = ?
+          ORDER BY wr.submitted_at DESC
+          LIMIT 10
+        `, [activeSettingId]);
+      } else {
+        [recentReports] = await db.execute(`
+          SELECT wr.status, wr.submitted_at, gu.first_name, gu.last_name
+          FROM welfare_reports wr
+          JOIN general_users gu ON wr.user_id = gu.user_id
+          ORDER BY wr.submitted_at DESC
+          LIMIT 10
+        `);
+      }
     } catch (tableError) {
       // If table doesn't exist, return empty statistics
       if (tableError.code === 'ER_NO_SUCH_TABLE') {
@@ -504,26 +572,19 @@ router.get('/stats', authenticateAdmin, async (req, res) => {
           latest_report_date: null
         }];
         latestDistribution = [];
+        totalActiveUsers = [{ count: 0 }];
         recentReports = [];
       } else {
         throw tableError;
       }
     }
 
-    // Get settings count
-    let settingsCount = 0;
-    let activeSettingsCount = 0;
-    try {
-      const [settingsResult] = await db.execute('SELECT COUNT(*) as total, SUM(is_active) as active FROM welfare_check_settings');
-      settingsCount = settingsResult[0].total || 0;
-      activeSettingsCount = settingsResult[0].active || 0;
-    } catch (settingsError) {
-      console.log('Welfare settings table does not exist or error occurred');
-    }
-
     // Get counts from latest distribution
     const latestSafeCount = latestDistribution.find(d => d.status === 'safe')?.count || 0;
     const latestNeedsHelpCount = latestDistribution.find(d => d.status === 'needs_help')?.count || 0;
+    const usersWithReports = latestSafeCount + latestNeedsHelpCount;
+    const totalUsers = totalActiveUsers[0]?.count || 0;
+    const notSubmittedCount = totalUsers - usersWithReports;
 
     res.json({
       success: true,
@@ -533,6 +594,7 @@ router.get('/stats', authenticateAdmin, async (req, res) => {
         totalReports: stats[0].total_reports || 0,
         safeReports: latestSafeCount,
         needsHelpReports: latestNeedsHelpCount,
+        notSubmitted: notSubmittedCount,
         uniqueUsers: stats[0].unique_users || 0,
         firstReportDate: stats[0].first_report_date,
         latestReportDate: stats[0].latest_report_date
