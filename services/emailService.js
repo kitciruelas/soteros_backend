@@ -113,6 +113,42 @@ const sendWithSendGrid = async (mailOptions) => {
   return { messageId: result[0].headers["x-message-id"] }
 }
 
+// Function to create Brevo SMTP transporter
+const createBrevoSMTPTransporter = () => {
+  // Check for Brevo SMTP credentials first
+  const brevoSmtpHost = process.env.BREVO_SMTP_HOST || "smtp-relay.brevo.com"
+  const brevoSmtpUser = process.env.BREVO_SMTP_USER || process.env.BREVO_SMTP_LOGIN
+  const brevoSmtpPass = process.env.BREVO_SMTP_PASS || process.env.BREVO_API_KEY
+  const brevoSmtpPort = process.env.BREVO_SMTP_PORT || 587
+
+  if (!brevoSmtpUser || !brevoSmtpPass) {
+    return null
+  }
+
+  console.log("📧 Creating Brevo SMTP transporter...", {
+    host: brevoSmtpHost,
+    port: brevoSmtpPort,
+    user: brevoSmtpUser ? "***configured***" : "MISSING",
+    hasPass: !!brevoSmtpPass
+  })
+
+  return nodemailer.createTransport({
+    host: brevoSmtpHost,
+    port: parseInt(brevoSmtpPort),
+    secure: parseInt(brevoSmtpPort) === 465,
+    auth: {
+      user: brevoSmtpUser,
+      pass: brevoSmtpPass,
+    },
+    tls: {
+      rejectUnauthorized: false,
+    },
+    connectionTimeout: 15000, // 15 seconds for Brevo
+    greetingTimeout: 15000,
+    socketTimeout: 15000,
+  })
+}
+
 // Function to create transporter with current config
 const createTransporter = () => {
   const smtpHost = process.env.SMTP_HOST || process.env.EMAIL_HOST || "smtp.gmail.com"
@@ -149,26 +185,61 @@ const createTransporter = () => {
 
 // Universal send function that tries Brevo first, then SendGrid, then SMTP
 const sendEmail = async (mailOptions) => {
-  // Try Brevo first (recommended for production/Render - 300/day free)
+  // Try Brevo API first (recommended for production/Render - 300/day free)
   if (brevoApi && process.env.BREVO_API_KEY) {
     try {
       console.log("📧 Attempting to send via Brevo API...")
       return await sendWithBrevo(mailOptions)
     } catch (brevoError) {
-      console.error("❌ Brevo failed:", brevoError.message)
+      console.error("❌ Brevo API failed:", brevoError.message)
       console.error("❌ Brevo error details:", {
         statusCode: brevoError.statusCode,
         response: brevoError.response?.body || brevoError.body,
         error: brevoError.error
       })
-      console.log("🔄 Falling back to SendGrid...")
+      
+      // If IP authorization error, try Brevo SMTP instead
+      if (brevoError.statusCode === 401 && 
+          (brevoError.response?.body?.message?.includes("unrecognised IP") || 
+           brevoError.response?.body?.code === "unauthorized")) {
+        console.log("🔄 Brevo API IP not authorized, trying Brevo SMTP...")
+        const brevoSmtpTransporter = createBrevoSMTPTransporter()
+        if (brevoSmtpTransporter) {
+          try {
+            console.log("📧 Attempting to send via Brevo SMTP...")
+            const result = await brevoSmtpTransporter.sendMail(mailOptions)
+            console.log("✅ Email sent via Brevo SMTP successfully")
+            return { messageId: result.messageId }
+          } catch (brevoSmtpError) {
+            console.error("❌ Brevo SMTP failed:", brevoSmtpError.message)
+            console.log("🔄 Falling back to SendGrid...")
+          }
+        } else {
+          console.log("⚠️ Brevo SMTP not configured, falling back to SendGrid...")
+        }
+      } else {
+        console.log("🔄 Falling back to SendGrid...")
+      }
     }
   } else {
-    console.warn("⚠️ Brevo not available:", {
+    console.warn("⚠️ Brevo API not available:", {
       hasBrevoApi: !!brevoApi,
       hasApiKey: !!process.env.BREVO_API_KEY,
       reason: !brevoApi ? "Brevo API not initialized" : "BREVO_API_KEY not set"
     })
+    
+    // Try Brevo SMTP if API is not available
+    const brevoSmtpTransporter = createBrevoSMTPTransporter()
+    if (brevoSmtpTransporter) {
+      try {
+        console.log("📧 Attempting to send via Brevo SMTP (API not available)...")
+        const result = await brevoSmtpTransporter.sendMail(mailOptions)
+        console.log("✅ Email sent via Brevo SMTP successfully")
+        return { messageId: result.messageId }
+      } catch (brevoSmtpError) {
+        console.error("❌ Brevo SMTP failed:", brevoSmtpError.message)
+      }
+    }
   }
 
   // Try SendGrid as backup (100/day free)
@@ -184,7 +255,7 @@ const sendEmail = async (mailOptions) => {
 
   // Fallback to SMTP (may timeout on Render - NOT RECOMMENDED)
   console.warn("⚠️ WARNING: Using SMTP fallback (may timeout on Render)")
-  console.warn("⚠️ Please configure BREVO_API_KEY to use Brevo email service")
+  console.warn("⚠️ Please configure Brevo SMTP or BREVO_API_KEY to use Brevo email service")
   console.log("📧 Sending via SMTP...")
   const transporter = createTransporter()
   return await transporter.sendMail(mailOptions)
