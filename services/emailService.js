@@ -1,8 +1,21 @@
 const nodemailer = require("nodemailer")
 const pool = require("../config/conn")
 
-// Brevo API disabled - using Brevo SMTP instead (no IP whitelist needed)
-// Brevo SMTP works perfectly on Render without IP restrictions
+// Brevo API - Primary method (works on Render, but may need IP whitelist disabled)
+let brevoApi = null
+try {
+  const brevo = require("@getbrevo/brevo")
+  if (process.env.BREVO_API_KEY) {
+    brevoApi = new brevo.TransactionalEmailsApi()
+    brevoApi.setApiKey(
+      brevo.TransactionalEmailsApiApiKeys.apiKey,
+      process.env.BREVO_API_KEY
+    )
+    console.log("✅ Brevo API configured successfully")
+  }
+} catch (error) {
+  console.log("⚠️ Brevo API not available, will use SendGrid or SMTP fallback")
+}
 
 // Try to load SendGrid (optional dependency - backup only)
 let sgMail = null
@@ -16,8 +29,56 @@ try {
   console.log("⚠️ SendGrid not available")
 }
 
-// Brevo API function removed - using Brevo SMTP instead
-// No IP whitelist needed, works on Render
+// Function to send email using Brevo API
+const sendWithBrevo = async (mailOptions) => {
+  if (!brevoApi || !process.env.BREVO_API_KEY) {
+    throw new Error("Brevo API not configured")
+  }
+
+  const brevo = require("@getbrevo/brevo")
+  const sendSmtpEmail = new brevo.SendSmtpEmail()
+
+  sendSmtpEmail.sender = { 
+    email: process.env.BREVO_FROM_EMAIL || process.env.EMAIL_FROM_ADDRESS || process.env.EMAIL_USER,
+    name: process.env.EMAIL_FROM_NAME || "SoteROS Emergency Management"
+  }
+  sendSmtpEmail.to = [{ email: mailOptions.to }]
+  sendSmtpEmail.subject = mailOptions.subject
+  sendSmtpEmail.htmlContent = mailOptions.html
+
+  console.log("📧 Sending email via Brevo API...")
+  try {
+    const result = await brevoApi.sendTransacEmail(sendSmtpEmail)
+    console.log("✅ Email sent via Brevo API successfully")
+    return { messageId: result.messageId }
+  } catch (error) {
+    // Extract detailed error information
+    const errorDetails = {
+      message: error.message || "Unknown error",
+      statusCode: error.statusCode,
+      response: error.response?.body || error.response,
+      code: error.code,
+    }
+    
+    // Log full error details
+    console.error("❌ Brevo API Error:", JSON.stringify(errorDetails, null, 2))
+    
+    // Provide helpful error message for IP restriction
+    if (error.statusCode === 401) {
+      const responseBody = error.response?.body || error.response
+      if (responseBody?.message?.includes("unrecognised IP address")) {
+        throw new Error(
+          `Brevo API: IP address not authorized. ` +
+          `SOLUTION: Go to https://app.brevo.com/security/authorised_ips and DISABLE IP restrictions ` +
+          `(or add your Render IP). This is required for Render deployment.`
+        )
+      }
+      throw new Error("Brevo API authentication failed. Please check your BREVO_API_KEY.")
+    }
+    
+    throw new Error(`Brevo API error: ${error.message || JSON.stringify(errorDetails)}`)
+  }
+}
 
 // Function to send email using SendGrid API
 const sendWithSendGrid = async (mailOptions) => {
@@ -27,7 +88,7 @@ const sendWithSendGrid = async (mailOptions) => {
 
   const msg = {
     to: mailOptions.to,
-    from: process.env.SENDGRID_FROM_EMAIL || process.env.EMAIL_USER,
+    from: process.env.SENDGRID_FROM_EMAIL || process.env.EMAIL_FROM || process.env.EMAIL_USER,
     subject: mailOptions.subject,
     html: mailOptions.html,
   }
@@ -80,64 +141,66 @@ const createTransporter = () => {
   })
 }
 
-// Universal send function - uses Brevo SMTP directly (no API, no IP whitelist needed)
+// Universal send function - uses Brevo API first (works on Render if IP restrictions disabled)
 const sendEmail = async (mailOptions) => {
-  // Primary: Brevo SMTP (works on Render, no IP restrictions)
-  try {
-    console.log("📧 Sending via Brevo SMTP...")
-    const transporter = createTransporter()
-    const result = await transporter.sendMail(mailOptions)
-    console.log("✅ Email sent via Brevo SMTP successfully")
-    return result
-  } catch (smtpError) {
-    console.error("❌ Brevo SMTP failed:", smtpError.message)
-    
-    // Optional: Try SendGrid API as backup (if configured)
-    if (sgMail && process.env.SENDGRID_API_KEY) {
-      try {
-        console.log("🔄 Falling back to SendGrid API...")
-        return await sendWithSendGrid(mailOptions)
-      } catch (sendGridError) {
-        console.error("❌ SendGrid also failed:", sendGridError.message)
-        if (sendGridError.response?.body) {
-          console.error("❌ SendGrid error details:", JSON.stringify(sendGridError.response.body, null, 2))
-        }
-      }
+  const isRender = process.env.RENDER || process.env.RENDER_SERVICE_ID
+  
+  // Primary: Brevo API (works on Render if IP restrictions are disabled in Brevo settings)
+  if (brevoApi && process.env.BREVO_API_KEY) {
+    try {
+      console.log("📧 Attempting to send via Brevo API...")
+      return await sendWithBrevo(mailOptions)
+    } catch (brevoError) {
+      console.error("❌ Brevo API failed:", brevoError.message)
+      console.log("🔄 Falling back to SendGrid API...")
     }
-    
-    // Re-throw the original SMTP error if all methods failed
-    throw smtpError
   }
+
+  // Backup: SendGrid API (if configured)
+  if (sgMail && process.env.SENDGRID_API_KEY) {
+    try {
+      console.log("📧 Attempting to send via SendGrid API...")
+      return await sendWithSendGrid(mailOptions)
+    } catch (sendGridError) {
+      console.error("❌ SendGrid failed:", sendGridError.message)
+      if (sendGridError.response?.body) {
+        console.error("❌ SendGrid error details:", JSON.stringify(sendGridError.response.body, null, 2))
+      }
+      
+      // On Render, don't try SMTP (it's blocked)
+      if (isRender) {
+        throw new Error(
+          "All email APIs failed. On Render, SMTP is blocked. " +
+          "Please configure Brevo API (disable IP restrictions at https://app.brevo.com/security/authorised_ips) " +
+          "or SendGrid API."
+        )
+      }
+      
+      console.log("🔄 Falling back to SMTP...")
+    }
+  }
+
+  // Last resort: SMTP (only works outside Render)
+  if (isRender) {
+    throw new Error(
+      "Email service not configured. On Render, SMTP connections are blocked. " +
+      "Please configure BREVO_API_KEY and disable IP restrictions at https://app.brevo.com/security/authorised_ips " +
+      "OR configure SENDGRID_API_KEY."
+    )
+  }
+  
+  console.log("📧 Sending via SMTP (not recommended on Render)...")
+  const transporter = createTransporter()
+  return await transporter.sendMail(mailOptions)
 }
 
 const sendPasswordResetOTP = async (email, otp) => {
   try {
-    // Check Brevo SMTP configuration
-    const smtpHost = process.env.SMTP_HOST || process.env.EMAIL_HOST || "smtp-relay.brevo.com"
-    const smtpUser = process.env.SMTP_USER || process.env.EMAIL_USER || "apikey"
-    const smtpPass = process.env.SMTP_PASS || process.env.EMAIL_PASS || process.env.BREVO_API_KEY
-    const smtpPort = process.env.SMTP_PORT || process.env.EMAIL_PORT || 587
-
-    console.log("🔧 Brevo SMTP Configuration Debug:", {
-      "process.env.SMTP_USER": process.env.SMTP_USER ? "***set***" : "NOT SET",
-      "process.env.SMTP_PASS": process.env.SMTP_PASS ? "***set***" : "NOT SET",
-      "process.env.BREVO_API_KEY": process.env.BREVO_API_KEY ? "***set***" : "NOT SET",
-      smtpHost: smtpHost,
-      smtpUser: smtpUser ? "***configured***" : "MISSING",
-      smtpPass: smtpPass ? "***configured***" : "MISSING",
-      smtpPort: smtpPort,
-    })
-
-    if (!smtpPass) {
-      console.error("❌ Brevo SMTP configuration missing:", {
-        user: smtpUser,
-        pass: smtpPass ? "***set***" : "MISSING",
-        host: smtpHost,
-        port: smtpPort,
-      })
+    // Check if Brevo API is configured
+    if (!process.env.BREVO_API_KEY && !process.env.SENDGRID_API_KEY) {
       throw new Error(
-        `Brevo SMTP credentials missing. Please set SMTP_PASS or BREVO_API_KEY in your environment variables.\n` +
-        `Required: SMTP_HOST=smtp-relay.brevo.com, SMTP_USER=apikey, SMTP_PASS=YOUR_BREVO_API_KEY`
+        "Email service not configured. Please set BREVO_API_KEY or SENDGRID_API_KEY in your environment variables.\n" +
+        "For Brevo: Set BREVO_API_KEY and disable IP restrictions at https://app.brevo.com/security/authorised_ips"
       )
     }
 
