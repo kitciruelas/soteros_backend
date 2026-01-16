@@ -1,98 +1,23 @@
 const nodemailer = require("nodemailer")
 const pool = require("../config/conn")
 
-// Try to load Brevo (optional dependency)
-let brevoApi = null
-try {
-  const brevo = require("@getbrevo/brevo")
-  if (process.env.BREVO_API_KEY) {
-    brevoApi = new brevo.TransactionalEmailsApi()
-    brevoApi.setApiKey(
-      brevo.TransactionalEmailsApiApiKeys.apiKey,
-      process.env.BREVO_API_KEY
-    )
-    console.log("✅ Brevo API configured successfully", {
-      hasApiKey: !!process.env.BREVO_API_KEY,
-      apiKeyLength: process.env.BREVO_API_KEY?.length || 0,
-      fromEmail: process.env.BREVO_FROM_EMAIL || process.env.EMAIL_USER || "NOT SET"
-    })
-  } else {
-    console.log("⚠️ BREVO_API_KEY not found in environment variables")
-  }
-} catch (error) {
-  console.error("❌ Brevo initialization error:", error.message)
-  console.log("⚠️ Brevo not available, will use SMTP fallback")
-}
+// Brevo API disabled - using Brevo SMTP instead (no IP whitelist needed)
+// Brevo SMTP works perfectly on Render without IP restrictions
 
-// Try to load SendGrid (optional dependency)
+// Try to load SendGrid (optional dependency - backup only)
 let sgMail = null
 try {
   sgMail = require("@sendgrid/mail")
   if (process.env.SENDGRID_API_KEY) {
     sgMail.setApiKey(process.env.SENDGRID_API_KEY)
-    console.log("✅ SendGrid API configured successfully")
+    console.log("✅ SendGrid API configured successfully (backup)")
   }
 } catch (error) {
   console.log("⚠️ SendGrid not available")
 }
 
-// Function to send email using Brevo API
-const sendWithBrevo = async (mailOptions) => {
-  if (!brevoApi || !process.env.BREVO_API_KEY) {
-    throw new Error("Brevo not configured")
-  }
-
-  const brevo = require("@getbrevo/brevo")
-  const sendSmtpEmail = new brevo.SendSmtpEmail()
-
-  const senderEmail = process.env.BREVO_FROM_EMAIL || process.env.EMAIL_USER
-  const senderName = process.env.EMAIL_FROM_NAME || "SoteROS Emergency Management"
-
-  if (!senderEmail) {
-    throw new Error("Brevo sender email not configured. Please set BREVO_FROM_EMAIL or EMAIL_USER")
-  }
-
-  sendSmtpEmail.sender = { 
-    email: senderEmail,
-    name: senderName
-  }
-  sendSmtpEmail.to = [{ email: mailOptions.to }]
-  sendSmtpEmail.subject = mailOptions.subject
-  sendSmtpEmail.htmlContent = mailOptions.html
-
-  console.log("📧 Sending email via Brevo API...", {
-    from: senderEmail,
-    to: mailOptions.to,
-    subject: mailOptions.subject
-  })
-
-  try {
-    const result = await brevoApi.sendTransacEmail(sendSmtpEmail)
-    console.log("✅ Email sent via Brevo successfully", {
-      messageId: result.messageId || result.body?.messageId
-    })
-    return { messageId: result.messageId || result.body?.messageId || "unknown" }
-  } catch (brevoError) {
-    console.error("❌ Brevo API Error:", {
-      message: brevoError.message,
-      statusCode: brevoError.statusCode,
-      response: brevoError.response?.body || brevoError.body,
-      error: brevoError.error
-    })
-    
-    // Provide helpful error messages
-    if (brevoError.statusCode === 401) {
-      throw new Error("Brevo API authentication failed. Please check your BREVO_API_KEY.")
-    } else if (brevoError.statusCode === 400) {
-      const errorMsg = brevoError.response?.body?.message || brevoError.body?.message || brevoError.message
-      throw new Error(`Brevo validation error: ${errorMsg}. Check that sender email (${senderEmail}) is verified in Brevo dashboard.`)
-    } else if (brevoError.statusCode === 402) {
-      throw new Error("Brevo account limit reached. Please check your Brevo account quota.")
-    } else {
-      throw brevoError
-    }
-  }
-}
+// Brevo API function removed - using Brevo SMTP instead
+// No IP whitelist needed, works on Render
 
 // Function to send email using SendGrid API
 const sendWithSendGrid = async (mailOptions) => {
@@ -113,55 +38,27 @@ const sendWithSendGrid = async (mailOptions) => {
   return { messageId: result[0].headers["x-message-id"] }
 }
 
-// Function to create Brevo SMTP transporter
-const createBrevoSMTPTransporter = () => {
-  // Check for Brevo SMTP credentials first
-  const brevoSmtpHost = process.env.BREVO_SMTP_HOST || "smtp-relay.brevo.com"
-  const brevoSmtpUser = process.env.BREVO_SMTP_USER || process.env.BREVO_SMTP_LOGIN
-  const brevoSmtpPass = process.env.BREVO_SMTP_PASS || process.env.BREVO_API_KEY
-  const brevoSmtpPort = process.env.BREVO_SMTP_PORT || 587
-
-  if (!brevoSmtpUser || !brevoSmtpPass) {
-    return null
-  }
-
-  console.log("📧 Creating Brevo SMTP transporter...", {
-    host: brevoSmtpHost,
-    port: brevoSmtpPort,
-    user: brevoSmtpUser ? "***configured***" : "MISSING",
-    hasPass: !!brevoSmtpPass
-  })
-
-  return nodemailer.createTransport({
-    host: brevoSmtpHost,
-    port: parseInt(brevoSmtpPort),
-    secure: parseInt(brevoSmtpPort) === 465,
-    auth: {
-      user: brevoSmtpUser,
-      pass: brevoSmtpPass,
-    },
-    tls: {
-      rejectUnauthorized: false,
-    },
-    connectionTimeout: 15000, // 15 seconds for Brevo
-    greetingTimeout: 15000,
-    socketTimeout: 15000,
-  })
-}
-
-// Function to create transporter with current config
+// Function to create transporter with Brevo SMTP (recommended for Render)
 const createTransporter = () => {
-  const smtpHost = process.env.SMTP_HOST || process.env.EMAIL_HOST || "smtp.gmail.com"
-  const smtpUser = process.env.EMAIL_USER || process.env.SMTP_USER
-  const smtpPass = process.env.EMAIL_PASS || process.env.SMTP_PASS
+  // Brevo SMTP configuration (no IP whitelist needed, works on Render)
+  const smtpHost = process.env.SMTP_HOST || process.env.EMAIL_HOST || "smtp-relay.brevo.com"
+  const smtpUser = process.env.SMTP_USER || process.env.EMAIL_USER || "apikey"
+  const smtpPass = process.env.SMTP_PASS || process.env.EMAIL_PASS || process.env.BREVO_API_KEY
   const smtpPort = process.env.SMTP_PORT || process.env.EMAIL_PORT || 587
 
-  console.log("📧 Creating transporter with config:", {
+  console.log("📧 Creating Brevo SMTP transporter with config:", {
     host: smtpHost,
     port: smtpPort,
     user: smtpUser ? "***configured***" : "MISSING",
     pass: smtpPass ? "***configured***" : "MISSING",
   })
+
+  if (!smtpUser || !smtpPass) {
+    throw new Error(
+      "SMTP credentials missing. Please set SMTP_USER and SMTP_PASS (or BREVO_API_KEY) in your environment variables.\n" +
+      "For Brevo SMTP: SMTP_HOST=smtp-relay.brevo.com, SMTP_USER=apikey, SMTP_PASS=YOUR_BREVO_API_KEY"
+    )
+  }
 
   return nodemailer.createTransport({
     host: smtpHost,
@@ -174,127 +71,80 @@ const createTransporter = () => {
     tls: {
       rejectUnauthorized: false,
     },
-    connectionTimeout: 10000, // 10 seconds
-    greetingTimeout: 10000,
-    socketTimeout: 10000,
+    connectionTimeout: 15000, // 15 seconds
+    greetingTimeout: 15000,
+    socketTimeout: 15000,
     pool: true, // Use connection pooling
     maxConnections: 5,
     maxMessages: 100,
   })
 }
 
-// Universal send function that tries Brevo first, then SendGrid, then SMTP
+// Universal send function - uses Brevo SMTP directly (no API, no IP whitelist needed)
 const sendEmail = async (mailOptions) => {
-  // Try Brevo API first (recommended for production/Render - 300/day free)
-  if (brevoApi && process.env.BREVO_API_KEY) {
-    try {
-      console.log("📧 Attempting to send via Brevo API...")
-      return await sendWithBrevo(mailOptions)
-    } catch (brevoError) {
-      console.error("❌ Brevo API failed:", brevoError.message)
-      console.error("❌ Brevo error details:", {
-        statusCode: brevoError.statusCode,
-        response: brevoError.response?.body || brevoError.body,
-        error: brevoError.error
-      })
-      
-      // If IP authorization error, try Brevo SMTP instead
-      if (brevoError.statusCode === 401 && 
-          (brevoError.response?.body?.message?.includes("unrecognised IP") || 
-           brevoError.response?.body?.code === "unauthorized")) {
-        console.log("🔄 Brevo API IP not authorized, trying Brevo SMTP...")
-        const brevoSmtpTransporter = createBrevoSMTPTransporter()
-        if (brevoSmtpTransporter) {
-          try {
-            console.log("📧 Attempting to send via Brevo SMTP...")
-            const result = await brevoSmtpTransporter.sendMail(mailOptions)
-            console.log("✅ Email sent via Brevo SMTP successfully")
-            return { messageId: result.messageId }
-          } catch (brevoSmtpError) {
-            console.error("❌ Brevo SMTP failed:", brevoSmtpError.message)
-            console.log("🔄 Falling back to SendGrid...")
-          }
-        } else {
-          console.log("⚠️ Brevo SMTP not configured, falling back to SendGrid...")
-        }
-      } else {
-        console.log("🔄 Falling back to SendGrid...")
-      }
-    }
-  } else {
-    console.warn("⚠️ Brevo API not available:", {
-      hasBrevoApi: !!brevoApi,
-      hasApiKey: !!process.env.BREVO_API_KEY,
-      reason: !brevoApi ? "Brevo API not initialized" : "BREVO_API_KEY not set"
-    })
+  // Primary: Brevo SMTP (works on Render, no IP restrictions)
+  try {
+    console.log("📧 Sending via Brevo SMTP...")
+    const transporter = createTransporter()
+    const result = await transporter.sendMail(mailOptions)
+    console.log("✅ Email sent via Brevo SMTP successfully")
+    return result
+  } catch (smtpError) {
+    console.error("❌ Brevo SMTP failed:", smtpError.message)
     
-    // Try Brevo SMTP if API is not available
-    const brevoSmtpTransporter = createBrevoSMTPTransporter()
-    if (brevoSmtpTransporter) {
+    // Optional: Try SendGrid API as backup (if configured)
+    if (sgMail && process.env.SENDGRID_API_KEY) {
       try {
-        console.log("📧 Attempting to send via Brevo SMTP (API not available)...")
-        const result = await brevoSmtpTransporter.sendMail(mailOptions)
-        console.log("✅ Email sent via Brevo SMTP successfully")
-        return { messageId: result.messageId }
-      } catch (brevoSmtpError) {
-        console.error("❌ Brevo SMTP failed:", brevoSmtpError.message)
+        console.log("🔄 Falling back to SendGrid API...")
+        return await sendWithSendGrid(mailOptions)
+      } catch (sendGridError) {
+        console.error("❌ SendGrid also failed:", sendGridError.message)
+        if (sendGridError.response?.body) {
+          console.error("❌ SendGrid error details:", JSON.stringify(sendGridError.response.body, null, 2))
+        }
       }
     }
+    
+    // Re-throw the original SMTP error if all methods failed
+    throw smtpError
   }
-
-  // Try SendGrid as backup (100/day free)
-  if (sgMail && process.env.SENDGRID_API_KEY) {
-    try {
-      console.log("📧 Attempting to send via SendGrid API...")
-      return await sendWithSendGrid(mailOptions)
-    } catch (sendGridError) {
-      console.error("❌ SendGrid failed:", sendGridError.message)
-      console.log("🔄 Falling back to SMTP...")
-    }
-  }
-
-  // Fallback to SMTP (may timeout on Render - NOT RECOMMENDED)
-  console.warn("⚠️ WARNING: Using SMTP fallback (may timeout on Render)")
-  console.warn("⚠️ Please configure Brevo SMTP or BREVO_API_KEY to use Brevo email service")
-  console.log("📧 Sending via SMTP...")
-  const transporter = createTransporter()
-  return await transporter.sendMail(mailOptions)
 }
 
 const sendPasswordResetOTP = async (email, otp) => {
   try {
-    const smtpHost = process.env.SMTP_HOST || process.env.EMAIL_HOST || "smtp.gmail.com"
-    const smtpUser = process.env.EMAIL_USER || process.env.SMTP_USER
-    const smtpPass = process.env.EMAIL_PASS || process.env.SMTP_PASS
+    // Check Brevo SMTP configuration
+    const smtpHost = process.env.SMTP_HOST || process.env.EMAIL_HOST || "smtp-relay.brevo.com"
+    const smtpUser = process.env.SMTP_USER || process.env.EMAIL_USER || "apikey"
+    const smtpPass = process.env.SMTP_PASS || process.env.EMAIL_PASS || process.env.BREVO_API_KEY
     const smtpPort = process.env.SMTP_PORT || process.env.EMAIL_PORT || 587
 
-    console.log("🔧 SMTP Configuration Debug:", {
-      "process.env.EMAIL_USER": process.env.EMAIL_USER ? "***set***" : "NOT SET",
+    console.log("🔧 Brevo SMTP Configuration Debug:", {
       "process.env.SMTP_USER": process.env.SMTP_USER ? "***set***" : "NOT SET",
-      "process.env.EMAIL_PASS": process.env.EMAIL_PASS ? "***set***" : "NOT SET",
       "process.env.SMTP_PASS": process.env.SMTP_PASS ? "***set***" : "NOT SET",
+      "process.env.BREVO_API_KEY": process.env.BREVO_API_KEY ? "***set***" : "NOT SET",
       smtpHost: smtpHost,
       smtpUser: smtpUser ? "***configured***" : "MISSING",
       smtpPass: smtpPass ? "***configured***" : "MISSING",
       smtpPort: smtpPort,
     })
 
-    if (!smtpUser || !smtpPass) {
-      console.error("❌ SMTP configuration missing required credentials:", {
-        user: smtpUser ? "***set***" : "MISSING",
+    if (!smtpPass) {
+      console.error("❌ Brevo SMTP configuration missing:", {
+        user: smtpUser,
         pass: smtpPass ? "***set***" : "MISSING",
         host: smtpHost,
         port: smtpPort,
       })
       throw new Error(
-        `SMTP credentials missing. Please set EMAIL_USER and EMAIL_PASS in your .env file. Current: User=${smtpUser ? "set" : "missing"}, Pass=${smtpPass ? "set" : "missing"}`,
+        `Brevo SMTP credentials missing. Please set SMTP_PASS or BREVO_API_KEY in your environment variables.\n` +
+        `Required: SMTP_HOST=smtp-relay.brevo.com, SMTP_USER=apikey, SMTP_PASS=YOUR_BREVO_API_KEY`
       )
     }
 
-    console.log("Attempting to send password reset OTP to:", email)
+    console.log("📧 Attempting to send password reset OTP to:", email)
 
     const mailOptions = {
-      from: `"${process.env.EMAIL_FROM_NAME || "SoteROS Emergency Management"}" <${process.env.EMAIL_FROM_ADDRESS || process.env.SMTP_USER}>`,
+      from: process.env.EMAIL_FROM || `"${process.env.EMAIL_FROM_NAME || "SoteROS Emergency Management"}" <${process.env.EMAIL_FROM_ADDRESS || process.env.SMTP_USER}>`,
       to: email,
       subject: "Password Reset Request - SoteROS",
       html: `
@@ -436,7 +286,7 @@ const sendIncidentAssignmentEmail = async (incidentData, teamId) => {
     for (const member of teamMembers) {
       try {
         const mailOptions = {
-          from: `"SoteROS Emergency Management" <${process.env.SMTP_USER}>`,
+          from: process.env.EMAIL_FROM || `"${process.env.EMAIL_FROM_NAME || "SoteROS Emergency Management"}" <${process.env.EMAIL_FROM_ADDRESS || process.env.SMTP_USER}>`,
           to: member.email,
           subject: `🚨 Incident Assignment - ${incidentData.type}`,
           html: `
@@ -602,7 +452,7 @@ const sendStaffAssignmentEmail = async (incidentData, staffId) => {
     const priorityColor = priorityColors[incidentData.priorityLevel] || priorityColors["Medium"]
 
     const mailOptions = {
-      from: `"SoteROS Emergency Management" <${process.env.SMTP_USER}>`,
+      from: process.env.EMAIL_FROM || `"${process.env.EMAIL_FROM_NAME || "SoteROS Emergency Management"}" <${process.env.EMAIL_FROM_ADDRESS || process.env.SMTP_USER}>`,
       to: staffMember.email,
       subject: `🚨 Personal Incident Assignment - ${incidentData.type}`,
       html: `
@@ -731,7 +581,7 @@ const sendStaffAccountCreationEmail = async (staffData, plainPassword) => {
     const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000"
 
     const mailOptions = {
-      from: `"${process.env.EMAIL_FROM_NAME || "SoteROS Emergency Management"}" <${process.env.EMAIL_FROM_ADDRESS || process.env.SMTP_USER}>`,
+      from: process.env.EMAIL_FROM || `"${process.env.EMAIL_FROM_NAME || "SoteROS Emergency Management"}" <${process.env.EMAIL_FROM_ADDRESS || process.env.SMTP_USER}>`,
       to: staffData.email,
       subject: "Welcome to SoteROS - Your Account is Ready",
       html: `
@@ -857,15 +707,10 @@ const sendStaffAccountCreationEmail = async (staffData, plainPassword) => {
 
 const sendEmailVerificationOTP = async (email, otp, firstName) => {
   try {
-    const smtpHost = process.env.SMTP_HOST || process.env.EMAIL_HOST || "smtp.gmail.com"
-    const smtpUser = process.env.EMAIL_USER || process.env.SMTP_USER
-    const smtpPass = process.env.EMAIL_PASS || process.env.SMTP_PASS
-    const smtpPort = process.env.SMTP_PORT || process.env.EMAIL_PORT || 587
-
-    console.log("Attempting to send email verification OTP to:", email)
+    console.log("📧 Attempting to send email verification OTP to:", email)
 
     const mailOptions = {
-      from: `"${process.env.EMAIL_FROM_NAME || "SoteROS Emergency Management"}" <${process.env.EMAIL_FROM_ADDRESS || process.env.SMTP_USER}>`,
+      from: process.env.EMAIL_FROM || `"${process.env.EMAIL_FROM_NAME || "SoteROS Emergency Management"}" <${process.env.EMAIL_FROM_ADDRESS || process.env.SMTP_USER}>`,
       to: email,
       subject: "Verify Your Email - SoteROS",
       html: `
