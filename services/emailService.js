@@ -11,9 +11,16 @@ try {
       brevo.TransactionalEmailsApiApiKeys.apiKey,
       process.env.BREVO_API_KEY
     )
-    console.log("✅ Brevo API configured successfully")
+    console.log("✅ Brevo API configured successfully", {
+      hasApiKey: !!process.env.BREVO_API_KEY,
+      apiKeyLength: process.env.BREVO_API_KEY?.length || 0,
+      fromEmail: process.env.BREVO_FROM_EMAIL || process.env.EMAIL_USER || "NOT SET"
+    })
+  } else {
+    console.log("⚠️ BREVO_API_KEY not found in environment variables")
   }
 } catch (error) {
+  console.error("❌ Brevo initialization error:", error.message)
   console.log("⚠️ Brevo not available, will use SMTP fallback")
 }
 
@@ -38,18 +45,53 @@ const sendWithBrevo = async (mailOptions) => {
   const brevo = require("@getbrevo/brevo")
   const sendSmtpEmail = new brevo.SendSmtpEmail()
 
+  const senderEmail = process.env.BREVO_FROM_EMAIL || process.env.EMAIL_USER
+  const senderName = process.env.EMAIL_FROM_NAME || "SoteROS Emergency Management"
+
+  if (!senderEmail) {
+    throw new Error("Brevo sender email not configured. Please set BREVO_FROM_EMAIL or EMAIL_USER")
+  }
+
   sendSmtpEmail.sender = { 
-    email: process.env.BREVO_FROM_EMAIL || process.env.EMAIL_USER,
-    name: process.env.EMAIL_FROM_NAME || "SoteROS Emergency Management"
+    email: senderEmail,
+    name: senderName
   }
   sendSmtpEmail.to = [{ email: mailOptions.to }]
   sendSmtpEmail.subject = mailOptions.subject
   sendSmtpEmail.htmlContent = mailOptions.html
 
-  console.log("📧 Sending email via Brevo API...")
-  const result = await brevoApi.sendTransacEmail(sendSmtpEmail)
-  console.log("✅ Email sent via Brevo successfully")
-  return { messageId: result.messageId }
+  console.log("📧 Sending email via Brevo API...", {
+    from: senderEmail,
+    to: mailOptions.to,
+    subject: mailOptions.subject
+  })
+
+  try {
+    const result = await brevoApi.sendTransacEmail(sendSmtpEmail)
+    console.log("✅ Email sent via Brevo successfully", {
+      messageId: result.messageId || result.body?.messageId
+    })
+    return { messageId: result.messageId || result.body?.messageId || "unknown" }
+  } catch (brevoError) {
+    console.error("❌ Brevo API Error:", {
+      message: brevoError.message,
+      statusCode: brevoError.statusCode,
+      response: brevoError.response?.body || brevoError.body,
+      error: brevoError.error
+    })
+    
+    // Provide helpful error messages
+    if (brevoError.statusCode === 401) {
+      throw new Error("Brevo API authentication failed. Please check your BREVO_API_KEY.")
+    } else if (brevoError.statusCode === 400) {
+      const errorMsg = brevoError.response?.body?.message || brevoError.body?.message || brevoError.message
+      throw new Error(`Brevo validation error: ${errorMsg}. Check that sender email (${senderEmail}) is verified in Brevo dashboard.`)
+    } else if (brevoError.statusCode === 402) {
+      throw new Error("Brevo account limit reached. Please check your Brevo account quota.")
+    } else {
+      throw brevoError
+    }
+  }
 }
 
 // Function to send email using SendGrid API
@@ -114,8 +156,19 @@ const sendEmail = async (mailOptions) => {
       return await sendWithBrevo(mailOptions)
     } catch (brevoError) {
       console.error("❌ Brevo failed:", brevoError.message)
+      console.error("❌ Brevo error details:", {
+        statusCode: brevoError.statusCode,
+        response: brevoError.response?.body || brevoError.body,
+        error: brevoError.error
+      })
       console.log("🔄 Falling back to SendGrid...")
     }
+  } else {
+    console.warn("⚠️ Brevo not available:", {
+      hasBrevoApi: !!brevoApi,
+      hasApiKey: !!process.env.BREVO_API_KEY,
+      reason: !brevoApi ? "Brevo API not initialized" : "BREVO_API_KEY not set"
+    })
   }
 
   // Try SendGrid as backup (100/day free)
@@ -129,7 +182,9 @@ const sendEmail = async (mailOptions) => {
     }
   }
 
-  // Fallback to SMTP (may timeout on Render)
+  // Fallback to SMTP (may timeout on Render - NOT RECOMMENDED)
+  console.warn("⚠️ WARNING: Using SMTP fallback (may timeout on Render)")
+  console.warn("⚠️ Please configure BREVO_API_KEY to use Brevo email service")
   console.log("📧 Sending via SMTP...")
   const transporter = createTransporter()
   return await transporter.sendMail(mailOptions)
